@@ -234,6 +234,15 @@ router.patch("/:id", requireAuth, async (req, res) => {
       select: baseSelect,
     });
 
+    // ✅ ถ้าแก้ของตัวเอง อัปเดต session ให้สะท้อนค่าล่าสุด (อย่างน้อย name)
+    if (me?.id === id) {
+      req.session.user = {
+        ...req.session.user,
+        name: updated.name ?? req.session.user.name,
+        // ถ้าอนาคตเปิดให้แก้อื่น ๆ (เช่น department) ค่อย sync เพิ่มได้ที่นี่
+      };
+    }
+
     res.json({ ok: true, data: updated });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
@@ -246,12 +255,10 @@ router.post("/:id/reset-password", requireRole("admin"), async (req, res) => {
     const id = Number(req.params.id);
     const { newPassword } = req.body || {};
     if (!newPassword || newPassword.length < 8) {
-      return res
-        .status(400)
-        .json({
-          ok: false,
-          error: "newPassword must be at least 8 characters",
-        });
+      return res.status(400).json({
+        ok: false,
+        error: "newPassword must be at least 8 characters",
+      });
     }
 
     const user = await prisma.user.findFirst({
