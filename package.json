@@ -4,12 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --watch src --exec node src/index.js",
     "start": "node src/index.js",
-    "prisma:init": "npx prisma init",
-    "prisma:studio": "npx prisma studio",
-    "db:migrate": "npx prisma migrate dev",
+
+    "prisma:init": "prisma init",
+    "prisma:studio": "prisma studio",
+
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:reset": "prisma migrate reset --force",
     "db:seed": "node prisma/seed.js"
   },
   "keywords": [],
@@ -18,6 +21,7 @@
   "type": "module",
   "dependencies": {
     "@prisma/client": "^6.16.2",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",

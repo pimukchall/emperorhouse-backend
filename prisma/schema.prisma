@@ -1,15 +1,52 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
+}
+
+model Role {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique     // e.g. "admin", "staff"
+  labelTh   String
+  labelEn   String
+  users     User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Department {
+  id        Int     @id @default(autoincrement())
+  code      String  @unique     // e.g. "HR", "ACC"
+  nameTh    String
+  nameEn    String
+  users     User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           Int         @id @default(autoincrement())
+  email        String      @unique
+  passwordHash String
+  firstNameTh  String
+  lastNameTh   String
+  firstNameEn  String
+  lastNameEn   String
+
+  roleId       Int
+  departmentId Int
+
+  role         Role        @relation(fields: [roleId], references: [id])
+  department   Department  @relation(fields: [departmentId], references: [id])
+
+  // soft-delete: ตั้งค่าเวลาลบ
+  deletedAt    DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
