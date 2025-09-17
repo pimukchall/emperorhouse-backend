@@ -40,13 +40,12 @@ model User {
 
   roleId       Int
   departmentId Int
-
   role         Role        @relation(fields: [roleId], references: [id])
   department   Department  @relation(fields: [departmentId], references: [id])
 
-  // soft-delete: ตั้งค่าเวลาลบ
-  deletedAt    DateTime?
+  avatarPath   String?
 
+  deletedAt    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }

@@ -6,10 +6,8 @@
   "scripts": {
     "dev": "nodemon --watch src --exec node src/index.js",
     "start": "node src/index.js",
-
     "prisma:init": "prisma init",
     "prisma:studio": "prisma studio",
-
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
@@ -22,10 +20,13 @@
   "dependencies": {
     "@prisma/client": "^6.16.2",
     "bcrypt": "^6.0.0",
+    "cookie-session": "^2.1.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
-    "morgan": "^1.10.1"
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "sharp": "^0.34.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
