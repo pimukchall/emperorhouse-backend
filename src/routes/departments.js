@@ -5,8 +5,6 @@ import { requireAuth, requireRole } from '../middlewares/auth.js';
 export const router = Router();
 
 // ---- helpers ----
-const toInt = (v) =>
-  v === undefined || v === null || v === '' ? undefined : Number(v);
 
 const baseSelect = {
   id: true,
@@ -18,7 +16,7 @@ const baseSelect = {
 };
 
 // LIST: GET /api/departments?q=&page=&limit=&sortBy=&sort=
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const {
       q,
@@ -64,7 +62,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // READ: GET /api/departments/:id
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', async (req, res) => {
   const id = Number(req.params.id);
   const dept = await prisma.department.findUnique({ where: { id }, select: baseSelect });
   if (!dept) return res.status(404).json({ ok: false, error: 'Not found' });

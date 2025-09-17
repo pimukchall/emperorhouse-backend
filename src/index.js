@@ -16,7 +16,7 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: true,          // ปล่อยให้ front ส่งคุกกี้ได้ (ถ้าจะล็อก domain ค่อยปรับ)
+  origin: ["http://localhost:3000", "https://your-frontend.app"],
   credentials: true
 }));
 
