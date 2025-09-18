@@ -27,19 +27,20 @@ enum ContractType {
 }
 
 enum PositionLevel {
-  INTERN
-  STAFF
-  SENIOR
-  SUPERVISOR
-  MANAGER
-  DIRECTOR
-  EXECUTIVE
+  STAF
+  SVR
+  ASST
+  MGR
+  MD
+  CEO
+  ADMIN
+  DEV
 }
 
 /* ---------- Masters ---------- */
 model Role {
   id        Int      @id @default(autoincrement())
-  name      String   @unique              // e.g. "admin", "staff"
+  name      String   @unique              // e.g. "admin", "staff", "dev"
   labelTh   String
   labelEn   String
   users     User[]
@@ -50,7 +51,7 @@ model Role {
 
 model Department {
   id        Int      @id @default(autoincrement())
-  code      String   @unique              // e.g. "HR", "ACC"
+  code      String   @unique              // e.g. "30000" (HR)
   nameTh    String
   nameEn    String
 
@@ -62,7 +63,7 @@ model Department {
 
 model Organization {
   id        Int      @id @default(autoincrement())
-  code      String   @unique              // orgCode เช่น "HQ", "BR01"
+  code      String   @unique              // orgCode: "MK","CS","AD",...
   nameTh    String
   nameEn    String
 
@@ -98,20 +99,20 @@ model User {
   organization   Organization?  @relation(fields: [orgId], references: [id])
 
   // Employee master fields
-  employeeCode   String         @unique             // เช่น "68-0001" (YY-running)
-  positionName   String?                             // ชื่อตำแหน่ง (ภาษาไทย/อังกฤษรวมชั่วคราว)
-  positionLevel  PositionLevel?                      // ระดับตำแหน่ง
-  employeeType   EmployeeType?                       // รายวัน/รายเดือน
-  contractType   ContractType?                       // ประจำ/สัญญา/ทดลองงาน
+  employeeCode     String?         @unique             // เช่น "68-0001"
+  positionName     String?
+  positionLevel    PositionLevel?
+  employeeType     EmployeeType?
+  contractType     ContractType?
 
-  startDate        DateTime?                         // วันเริ่มงาน
-  probationEndDate DateTime?                         // วันสิ้นสุดทดลองงาน
-  resignedAt       DateTime?                         // วันลาออก (ถ้ามี)
-  birthDate        DateTime?                         // วันเกิด
-  gender           Gender?                           // เพศ (optional)
+  startDate        DateTime?
+  probationEndDate DateTime?
+  resignedAt       DateTime?
+  birthDate        DateTime?
+  gender           Gender?
 
-  signature        Bytes?                            // ลายเซ็น (BLOB) — หรือเก็บเป็น path ก็ได้
-  avatarPath       String?                           // path รูปโปรไฟล์
+  signature        Bytes?                            // ถ้าจะเปลี่ยนเป็น path ให้ใช้ String?
+  avatarPath       String?
 
   // Relations
   passwordResets   PasswordReset[]
@@ -121,11 +122,10 @@ model User {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  /* --- Indexes & Constraints --- */
-  // อนุญาตให้ reuse email ได้เมื่อลบแบบ soft (deletedAt != null)
+  // อนุญาตให้ reuse email ได้เมื่อ soft-delete
   @@unique([email, deletedAt])
 
-  // ช่วยค้นหา
+  // ค้นหาเร็ว
   @@index([roleId, departmentId])
   @@index([orgId])
   @@index([employeeType])
