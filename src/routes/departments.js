@@ -11,9 +11,9 @@ function buildWhere({ q }) {
   const s = String(q);
   return {
     OR: [
-      { code: { contains: s, mode: "insensitive" } },
-      { nameTh: { contains: s, mode: "insensitive" } },
-      { nameEn: { contains: s, mode: "insensitive" } },
+      { code: { contains: s} },
+      { nameTh: { contains: s } },
+      { nameEn: { contains: s } },
     ],
   };
 }

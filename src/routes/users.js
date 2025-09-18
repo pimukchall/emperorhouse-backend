@@ -38,12 +38,12 @@ router.get("/", requireAuth, async (req, res) => {
       ...(toInt(departmentId) ? { departmentId: toInt(departmentId) } : {}),
       ...(q ? {
         OR: [
-          { name: { contains: String(q), mode: "insensitive" } },
-          { email: { contains: String(q), mode: "insensitive" } },
-          { firstNameTh: { contains: String(q), mode: "insensitive" } },
-          { lastNameTh: { contains: String(q), mode: "insensitive" } },
-          { firstNameEn: { contains: String(q), mode: "insensitive" } },
-          { lastNameEn: { contains: String(q), mode: "insensitive" } },
+          { name: { contains: String(q) } },
+          { email: { contains: String(q) } },
+          { firstNameTh: { contains: String(q) } },
+          { lastNameTh: { contains: String(q) } },
+          { firstNameEn: { contains: String(q) } },
+          { lastNameEn: { contains: String(q) } },
         ],
       } : {}),
     };

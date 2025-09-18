@@ -172,12 +172,12 @@ router.get('/', requireRole('admin'), async (req, res) => {
     } = req.query;
 
     const where = {
-      ...(email ? { email: { contains: String(email), mode: 'insensitive' } } : {}),
+      ...(email ? { email: { contains: String(email) } } : {}),
       ...(q ? {
         OR: [
-          { name:    { contains: String(q), mode: 'insensitive' } },
-          { subject: { contains: String(q), mode: 'insensitive' } },
-          { message: { contains: String(q), mode: 'insensitive' } },
+          { name:    { contains: String(q) } },
+          { subject: { contains: String(q) } },
+          { message: { contains: String(q) } },
         ],
       } : {}),
       ...(dateFrom || dateTo ? {
