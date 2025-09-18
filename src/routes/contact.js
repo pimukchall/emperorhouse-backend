@@ -1,6 +1,7 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
 import { prisma } from "../prisma.js";
+import { requireRole } from '../middlewares/auth.js';
 
 export const router = Router();
 
@@ -28,7 +29,7 @@ const transporter = nodemailer.createTransport({
 // MAIL_FROM: ที่อยู่ผู้ส่ง (เช่น "No-Reply <no-reply@your.co>")
 // MAIL_TO:   กล่องที่ทีมคุณอยากรับแจ้ง (เช่น "support@your.co")
 
-router.post("/contact", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const {
       name = "",
@@ -161,3 +162,75 @@ function escapeHtml(s) {
 function nl2br(s) {
   return String(s || "").replace(/\n/g, "<br>");
 }
+
+// LIST: GET /api/contacts?q=&email=&dateFrom=&dateTo=&page=&limit=&sort=
+router.get('/', requireRole('admin'), async (req, res) => {
+  try {
+    const {
+      q, email, dateFrom, dateTo,
+      page = '1', limit = '20', sort = 'desc'
+    } = req.query;
+
+    const where = {
+      ...(email ? { email: { contains: String(email), mode: 'insensitive' } } : {}),
+      ...(q ? {
+        OR: [
+          { name:    { contains: String(q), mode: 'insensitive' } },
+          { subject: { contains: String(q), mode: 'insensitive' } },
+          { message: { contains: String(q), mode: 'insensitive' } },
+        ],
+      } : {}),
+      ...(dateFrom || dateTo ? {
+        createdAt: {
+          ...(dateFrom ? { gte: new Date(String(dateFrom)) } : {}),
+          ...(dateTo   ? { lte: new Date(String(dateTo))   } : {}),
+        },
+      } : {}),
+    };
+
+    const take = Math.min(100, Math.max(1, Number(limit) || 20));
+    const pageNum = Math.max(1, Number(page) || 1);
+    const skip = (pageNum - 1) * take;
+
+    const [total, items] = await Promise.all([
+      prisma.contactMessage.count({ where }),
+      prisma.contactMessage.findMany({
+        where,
+        orderBy: { createdAt: sort === 'asc' ? 'asc' : 'desc' },
+        skip,
+        take,
+      }),
+    ]);
+
+    res.json({
+      ok: true,
+      data: items,
+      meta: { page: pageNum, limit: take, total, pages: Math.ceil(total / take) },
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// READ: GET /api/contacts/:id
+router.get('/:id', requireRole('admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = await prisma.contactMessage.findUnique({ where: { id } });
+    if (!data) return res.status(404).json({ ok: false, error: 'Not found' });
+    res.json({ ok: true, data });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// DELETE: DELETE /api/contacts/:id
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await prisma.contactMessage.delete({ where: { id } });
+    res.json({ ok: true, deleted: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});

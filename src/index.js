@@ -41,7 +41,7 @@ app.use('/auth', authRouter);
 app.use('/profile', profileRouter);
 app.use('/api/roles', rolesRouter);
 app.use('/api/departments', departmentsRouter);
-app.use("/api", contactRouter);
+app.use("/api/contacts", contactRouter);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
