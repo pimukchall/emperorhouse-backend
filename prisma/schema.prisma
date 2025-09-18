@@ -23,6 +23,7 @@ model Department {
   code      String  @unique     // e.g. "HR", "ACC"
   nameTh    String
   nameEn    String
+  
   users     User[]
 
   createdAt DateTime @default(now())

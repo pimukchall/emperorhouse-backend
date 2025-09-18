@@ -43,6 +43,8 @@ app.use('/api/roles', rolesRouter);
 app.use('/api/departments', departmentsRouter);
 app.use("/api/contacts", contactRouter);
 
+app.use((_req, res) => res.status(404).send('Not Found'));
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
