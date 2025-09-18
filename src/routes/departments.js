@@ -1,41 +1,39 @@
-import { Router } from 'express';
-import { prisma } from '../prisma.js';
-import { requireAuth, requireRole } from '../middlewares/auth.js';
+import { Router } from "express";
+import { prisma } from "../prisma.js";
+import { requireRole } from "../middlewares/auth.js";
 
 export const router = Router();
 
-// ---- helpers ----
+// helpers
 
-const baseSelect = {
-  id: true,
-  code: true,
-  nameTh: true,
-  nameEn: true,
-  createdAt: true,
-  updatedAt: true,
-};
+function buildWhere({ q }) {
+  if (!q) return {};
+  const s = String(q);
+  return {
+    OR: [
+      { code: { contains: s, mode: "insensitive" } },
+      { nameTh: { contains: s, mode: "insensitive" } },
+      { nameEn: { contains: s, mode: "insensitive" } },
+    ],
+  };
+}
 
-// LIST: GET /api/departments?q=&page=&limit=&sortBy=&sort=
-router.get('/', async (req, res) => {
+/**
+ * GET /departments
+ * - เฉพาะผู้ล็อกอิน
+ * - รองรับ q, page, limit, sortBy, sort
+ */
+router.get("/", async (req, res) => {
   try {
     const {
       q,
-      page = '1',
-      limit = '50',
-      sortBy = 'id',
-      sort = 'asc',
+      page = "1",
+      limit = "50",
+      sortBy = "id",
+      sort = "asc",
     } = req.query;
 
-    const where = q
-      ? {
-          OR: [
-            { code: { contains: String(q), mode: 'insensitive' } },
-            { nameTh: { contains: String(q), mode: 'insensitive' } },
-            { nameEn: { contains: String(q), mode: 'insensitive' } },
-          ],
-        }
-      : {};
-
+    const where = buildWhere({ q });
     const pageNum = Math.max(1, Number(page) || 1);
     const take = Math.min(100, Math.max(1, Number(limit) || 50));
     const skip = (pageNum - 1) * take;
@@ -44,8 +42,7 @@ router.get('/', async (req, res) => {
       prisma.department.count({ where }),
       prisma.department.findMany({
         where,
-        select: baseSelect,
-        orderBy: { [sortBy]: sort === 'desc' ? 'desc' : 'asc' },
+        orderBy: { [sortBy]: sort === "desc" ? "desc" : "asc" },
         skip,
         take,
       }),
@@ -61,77 +58,93 @@ router.get('/', async (req, res) => {
   }
 });
 
-// READ: GET /api/departments/:id
-router.get('/:id', async (req, res) => {
-  const id = Number(req.params.id);
-  const dept = await prisma.department.findUnique({ where: { id }, select: baseSelect });
-  if (!dept) return res.status(404).json({ ok: false, error: 'Not found' });
-  res.json({ ok: true, data: dept });
-});
-
-// CREATE: POST /api/departments (admin-only)
-router.post('/', requireRole('admin'), async (req, res) => {
+/**
+ * POST /departments
+ * - admin เท่านั้น
+ * body: { code, nameTh, nameEn }
+ */
+router.post("/", requireRole("admin"), async (req, res) => {
   try {
-    const { code, nameTh = '', nameEn = '' } = req.body || {};
-    if (!code) return res.status(400).json({ ok: false, error: 'code required' });
+    const { code, nameTh, nameEn } = req.body || {};
+    if (!code) return res.status(400).json({ ok: false, error: "code required" });
+
+    // unique code
+    const exist = await prisma.department.findUnique({ where: { code } });
+    if (exist) return res.status(409).json({ ok: false, error: "code already exists" });
 
     const created = await prisma.department.create({
-      data: { code, nameTh, nameEn },
-      select: baseSelect,
+      data: {
+        code: String(code).trim(),
+        nameTh: String(nameTh || "").trim(),
+        nameEn: String(nameEn || "").trim(),
+      },
     });
+
     res.status(201).json({ ok: true, data: created });
   } catch (e) {
-    if (e.code === 'P2002') {
-      return res.status(409).json({ ok: false, error: 'Department code already exists' });
-    }
     res.status(400).json({ ok: false, error: e.message });
   }
 });
 
-// UPDATE: PATCH /api/departments/:id (admin-only)
-router.patch('/:id', requireRole('admin'), async (req, res) => {
+/**
+ * PATCH /departments/:id
+ * - admin เท่านั้น
+ */
+router.patch("/:id", requireRole("admin"), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { code, nameTh, nameEn } = req.body || {};
 
-    const data = {};
-    if (code !== undefined) data.code = code;
-    if (nameTh !== undefined) data.nameTh = nameTh;
-    if (nameEn !== undefined) data.nameEn = nameEn;
-    if (Object.keys(data).length === 0) {
-      return res.status(400).json({ ok: false, error: 'No updatable fields' });
+    const target = await prisma.department.findUnique({ where: { id } });
+    if (!target) return res.status(404).json({ ok: false, error: "Not found" });
+
+    // ถ้าแก้ code → เช็คซ้ำ
+    if (code && code !== target.code) {
+      const dup = await prisma.department.findUnique({ where: { code } });
+      if (dup) return res.status(409).json({ ok: false, error: "code already exists" });
     }
 
     const updated = await prisma.department.update({
       where: { id },
-      data,
-      select: baseSelect,
+      data: {
+        ...(code !== undefined ? { code: String(code).trim() } : {}),
+        ...(nameTh !== undefined ? { nameTh: String(nameTh || "").trim() } : {}),
+        ...(nameEn !== undefined ? { nameEn: String(nameEn || "").trim() } : {}),
+      },
     });
+
     res.json({ ok: true, data: updated });
   } catch (e) {
-    if (e.code === 'P2002') {
-      return res.status(409).json({ ok: false, error: 'Department code already exists' });
-    }
     res.status(400).json({ ok: false, error: e.message });
   }
 });
 
-// DELETE: DELETE /api/departments/:id (admin-only; block if in use)
-router.delete('/:id', requireRole('admin'), async (req, res) => {
+/**
+ * DELETE /departments/:id
+ * - admin เท่านั้น
+ * - กันลบถ้ายังมีผู้ใช้งานอ้างอิง
+ */
+router.delete("/:id", requireRole("admin"), async (req, res) => {
   try {
     const id = Number(req.params.id);
 
-    const usage = await prisma.user.count({ where: { departmentId: id } });
-    if (usage > 0) {
-      return res.status(409).json({
+    const target = await prisma.department.findUnique({ where: { id } });
+    if (!target) return res.status(404).json({ ok: false, error: "Not found" });
+
+    const inUse = await prisma.user.count({ where: { departmentId: id } });
+    if (inUse > 0) {
+      return res.status(400).json({
         ok: false,
-        error: `Cannot delete: ${usage} user(s) still reference this department`,
+        error: "Cannot delete: department is referenced by users",
+        refCount: inUse,
       });
     }
 
     await prisma.department.delete({ where: { id } });
-    res.json({ ok: true });
+    res.json({ ok: true, deleted: true });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
 });
+
+export default router;
