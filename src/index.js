@@ -10,6 +10,7 @@ import { router as authRouter } from './routes/auth.js';
 import { router as profileRouter } from './routes/profile.js';
 import { router as rolesRouter } from './routes/roles.js';
 import { router as departmentsRouter } from './routes/departments.js';
+import { router as contactRouter } from './routes/contact.js'
 
 dotenv.config();
 
@@ -20,7 +21,7 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 app.use(morgan('dev'));
 
 app.use(cookieSession({
@@ -40,6 +41,7 @@ app.use('/auth', authRouter);
 app.use('/profile', profileRouter);
 app.use('/api/roles', rolesRouter);
 app.use('/api/departments', departmentsRouter);
+app.use("/api", contactRouter);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {

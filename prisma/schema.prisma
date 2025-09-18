@@ -65,3 +65,16 @@ model PasswordReset {
   @@index([userId])
   @@index([token])
 }
+
+model ContactMessage {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(120)
+  email     String   @db.VarChar(160)
+  phone     String?  @db.VarChar(32)
+  subject   String   @db.VarChar(160)
+  message   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([email])
+}
