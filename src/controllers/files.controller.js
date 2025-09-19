@@ -1,26 +1,24 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { prisma } from "../prisma.js";
+import { UPLOADS_BASE, AVATAR_BASE, SIGNATURE_BASE } from "../config/paths.js";
 
-// ---------- paths ----------
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, "..", "..");
-const UPLOADS_DIR = path.join(ROOT, "uploads");
-
+// helper: ensure dir
 function ensureDir(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 }
-ensureDir(UPLOADS_DIR);
 
-async function writeImagePng({ buffer, dstDir, baseName }) {
-  ensureDir(dstDir);
-  const fileName = `${baseName}.png`;
-  const absPath = path.join(dstDir, fileName);
-  await fs.promises.writeFile(absPath, buffer);
-  const relPath = path.relative(ROOT, absPath).replace(/\\/g, "/");
-  return { absPath, relPath };
+// เขียนเป็น .png แล้วคืน path แบบ "relative ต่อ UPLOADS_BASE"
+async function writePngToUserFolder({ buffer, baseDir, userId, filename }) {
+  const userDir = path.join(baseDir, String(userId));
+  ensureDir(userDir);
+  const abs = path.join(userDir, filename.endsWith(".png") ? filename : `${filename}.png`);
+  await fs.promises.writeFile(abs, buffer);
+  // เก็บเป็น path แบบ POSIX relative ต่อ UPLOADS_BASE (ย้ายโปรเจ็กต์ได้ง่าย)
+  const rel = path
+    .relative(UPLOADS_BASE, abs)
+    .replace(/\\/g, "/"); // normalize ให้เป็น forward-slash
+  return { abs, rel };
 }
 
 // ========== Avatar ==========
@@ -33,20 +31,20 @@ export async function uploadAvatarController(req, res) {
       return res.status(400).json({ ok: false, error: "FILE_TOO_LARGE" });
     }
 
-    // บันทึกลงโฟลเดอร์ของ user
-    const dir = path.join(UPLOADS_DIR, "avatars", String(userId));
-    const { relPath } = await writeImagePng({
+    const { rel } = await writePngToUserFolder({
       buffer: req.file.buffer,
-      dstDir: dir,
-      baseName: "avatar",
+      baseDir: AVATAR_BASE,
+      userId,
+      filename: "avatar.png",
     });
 
+    // เก็บ path (String) ลง DB: ตัวอย่าง "avatars/3/avatar.png"
     await prisma.user.update({
       where: { id: userId },
-      data: { avatarPath: relPath }, // เก็บ path เป็น String
+      data: { avatarPath: rel },
     });
 
-    res.json({ ok: true, path: relPath, url: `/${relPath}` });
+    res.json({ ok: true, path: rel, url: `/profile/files/user/avatar/${userId}` });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message || String(e) });
   }
@@ -61,10 +59,11 @@ export async function getAvatarFileController(req, res) {
       where: { id },
       select: { avatarPath: true },
     });
-    const rel = u?.avatarPath;
+
+    const rel = u?.avatarPath; // เช่น "avatars/3/avatar.png"
     if (!rel) return res.status(404).end();
 
-    const abs = path.join(ROOT, rel);
+    const abs = path.join(UPLOADS_BASE, rel);
     if (!fs.existsSync(abs)) return res.status(404).end();
 
     res.sendFile(abs);
@@ -73,7 +72,7 @@ export async function getAvatarFileController(req, res) {
   }
 }
 
-// ========== Signature ==========
+// ========== Signature (Bytes ใน DB + ไฟล์นอกโปรเจ็กต์เพื่อจัดระเบียบ) ==========
 export async function uploadSignatureController(req, res) {
   try {
     const userId = req.user?.id || req.session?.user?.id;
@@ -83,18 +82,18 @@ export async function uploadSignatureController(req, res) {
       return res.status(400).json({ ok: false, error: "FILE_TOO_LARGE" });
     }
 
-    // บันทึกลงโฟลเดอร์ของ user (เพื่อจัดระเบียบไฟล์ตามที่ต้องการ)
-    const dir = path.join(UPLOADS_DIR, "signatures", String(userId));
-    await writeImagePng({
+    // 1) เขียนไฟล์ไว้ที่ ../upload/signatures/<uid>/signature.png (จัดระเบียบตาม user)
+    await writePngToUserFolder({
       buffer: req.file.buffer,
-      dstDir: dir,
-      baseName: "signature",
+      baseDir: SIGNATURE_BASE,
+      userId,
+      filename: "signature.png",
     });
 
-    // เก็บเป็น Bytes ลง DB (กัน error ชนิดข้อมูล)
+    // 2) เก็บ Bytes ลง DB ให้ตรง schema (Prisma Bytes รองรับ Buffer ใน Node)
     await prisma.user.update({
       where: { id: userId },
-      data: { signature: req.file.buffer }, // Prisma Bytes รองรับ Buffer โดยตรง
+      data: { signature: req.file.buffer },
     });
 
     res.json({ ok: true });

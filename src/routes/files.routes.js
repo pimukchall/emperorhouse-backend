@@ -1,12 +1,9 @@
 import { Router } from "express";
-
-// ✅ ใช้ middleware อัปโหลดจาก upload.js (memory storage + filter + limit)
 import {
   uploadAvatarSingle,
   uploadSignatureSingle,
 } from "../middlewares/upload.js";
 
-// controllers
 import {
   uploadAvatarController,
   getAvatarFileController,
@@ -14,7 +11,7 @@ import {
   getSignatureFileController,
 } from "../controllers/files.controller.js";
 
-// ✅ requireAuth รองรับทั้ง req.user และ req.session.user
+// บังคับล็อกอิน (รองรับทั้ง req.user และ req.session.user)
 function requireAuth(req, res, next) {
   const u = req.user || req.session?.user;
   if (!u?.id) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
