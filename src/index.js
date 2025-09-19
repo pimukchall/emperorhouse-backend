@@ -73,7 +73,7 @@ export function createApp() {
   app.use('/api/departments', departmentsRouter);
   app.use(filesRouter);
   app.use('/api/contacts', contactsRouter);
-  app.use('api/organizations',organizationsRouter);
+  app.use("/api/organizations", organizationsRouter);
 
   // health
   app.get('/', (_req, res) => res.json({ ok: true }));

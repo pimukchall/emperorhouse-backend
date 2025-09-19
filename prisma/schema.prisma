@@ -80,6 +80,7 @@ model Organization {
   code   String @unique
   nameTh String
   nameEn String
+  deletedAt DateTime?
 
   users User[]
 
