@@ -25,6 +25,18 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// ---------- ENUM Normalizers ----------
+const EMPLOYEE_TYPES = ["DAILY", "MONTHLY"];
+const CONTRACT_TYPES = ["PERMANENT", "TEMPORARY", "PROBATION"];
+const GENDERS = ["MALE", "FEMALE", "OTHER"];
+
+function normEnum(v, allowed) {
+  if (v === undefined) return undefined;   // ไม่แตะ
+  if (v === null || v === "") return null; // clear ค่า
+  const s = String(v).toUpperCase().trim();
+  return allowed.includes(s) ? s : null;   // ถ้าไม่ตรง enum → เซ็ต null กัน error
+}
+
 /**
  * GET users (search/sort/paging + roleId + departmentId + includeDeleted)
  * - departmentId จะ filter ผ่าน relation: primaryUserDept หรือ userDepartments (active)
@@ -93,9 +105,10 @@ export async function getUserService({ prisma, id }) {
 }
 
 /**
- * สร้างผู้ใช้ใหม่ ให้ตรง schema:
- * - firstNameTh/lastNameTh/firstNameEn/lastNameEn เป็น non-null → บังคับเป็น "" ถ้าไม่ส่ง/ว่าง
- * - ไม่เขียน user.departmentId (schema นี้ไม่ได้เก็บตรง) — primary ใช้ผ่าน userDepartments
+ * สร้างผู้ใช้ใหม่:
+ * - บังคับ string non-null เป็น "" แทน null
+ * - normalize enum: employeeType/contractType/gender
+ * - ตั้ง primary ผ่าน userDepartments แล้ว sync primaryUserDeptId
  */
 export async function createUserService({ prisma, data }) {
   const {
@@ -105,7 +118,7 @@ export async function createUserService({ prisma, data }) {
     employeeCode, employeeType, contractType,
     startDate, probationEndDate, resignedAt, birthDate, gender,
     avatarPath, signature,
-    departmentId, // ใช้สร้าง assignment ที่จะเป็น Primary
+    departmentId,
   } = data;
 
   if (!email || !password || !roleId || !firstNameTh || !lastNameTh || !firstNameEn || !lastNameEn) {
@@ -124,19 +137,24 @@ export async function createUserService({ prisma, data }) {
         passwordHash,
         roleId: Number(roleId),
         orgId: orgId ? Number(orgId) : null,
+
         name: safeStr(name, { allowNull: false }) ?? "",
         firstNameTh: safeStr(firstNameTh, { allowNull: false }),
         lastNameTh: safeStr(lastNameTh, { allowNull: false }),
         firstNameEn: safeStr(firstNameEn, { allowNull: false }),
         lastNameEn: safeStr(lastNameEn, { allowNull: false }),
+
         employeeCode: safeStr(employeeCode, { allowNull: true }) ?? null,
-        employeeType: safeStr(employeeType, { allowNull: true }) ?? null,
-        contractType: safeStr(contractType, { allowNull: true }) ?? null,
+        employeeType: normEnum(employeeType, EMPLOYEE_TYPES),
+        contractType: normEnum(contractType, CONTRACT_TYPES),
+
         startDate: startDate ? new Date(startDate) : null,
         probationEndDate: probationEndDate ? new Date(probationEndDate) : null,
         resignedAt: resignedAt ? new Date(resignedAt) : null,
         birthDate: birthDate ? new Date(birthDate) : null,
-        gender: safeStr(gender, { allowNull: true }) ?? null,
+
+        gender: normEnum(gender, GENDERS),
+
         avatarPath: safeStr(avatarPath, { allowNull: true }) ?? null,
         signature: signature || null,
       },
@@ -155,7 +173,7 @@ export async function createUserService({ prisma, data }) {
       select: { id: true },
     });
 
-    // ชี้ primary ไปยังแถวนี้ (ไม่มี isPrimary ในตาราง userDepartment)
+    // ชี้ primary ไปยังแถวนี้
     await tx.user.update({
       where: { id: u.id },
       data: { primaryUserDeptId: ud.id },
@@ -172,9 +190,10 @@ export async function createUserService({ prisma, data }) {
 
 /**
  * อัปเดตผู้ใช้:
- * - กัน null ในฟิลด์ non-null ด้วย safeStr
+ * - กัน null ในฟิลด์ non-null
  * - แปลงวันที่
- * - ถ้ามี departmentId → ตั้ง primary ผ่าน userDepartments และ sync primaryUserDeptId
+ * - normalize enum ให้ตรง schema
+ * - ถ้ามี departmentId → สร้าง/อ้าง assignment แล้วตั้ง primaryUserDeptId
  */
 export async function updateUserService({ prisma, id, data }) {
   const allow = [
@@ -204,6 +223,11 @@ export async function updateUserService({ prisma, id, data }) {
   for (const k of ["startDate", "probationEndDate", "resignedAt", "birthDate"]) {
     if (k in payloadIn) payloadIn[k] = payloadIn[k] ? new Date(payloadIn[k]) : null;
   }
+
+  // ✅ Normalize ENUMs
+  if ("employeeType" in payloadIn) payloadIn.employeeType = normEnum(payloadIn.employeeType, EMPLOYEE_TYPES);
+  if ("contractType" in payloadIn) payloadIn.contractType = normEnum(payloadIn.contractType, CONTRACT_TYPES);
+  if ("gender" in payloadIn) payloadIn.gender = normEnum(payloadIn.gender, GENDERS);
 
   const depId = toInt(payloadIn.departmentId);
   delete payloadIn.departmentId;
