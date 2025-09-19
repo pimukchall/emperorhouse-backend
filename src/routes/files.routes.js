@@ -1,34 +1,35 @@
 import { Router } from "express";
-import { requireAuth } from "../middlewares/auth.js";
-import { uploadAvatarSingle } from "../middlewares/upload.js";
+
+// ✅ ใช้ middleware อัปโหลดจาก upload.js (memory storage + filter + limit)
 import {
-  getProfileController,
-  updateProfileController,
-  saveSignatureController,
+  uploadAvatarSingle,
+  uploadSignatureSingle,
+} from "../middlewares/upload.js";
+
+// controllers
+import {
   uploadAvatarController,
   getAvatarFileController,
+  uploadSignatureController,
+  getSignatureFileController,
 } from "../controllers/files.controller.js";
+
+// ✅ requireAuth รองรับทั้ง req.user และ req.session.user
+function requireAuth(req, res, next) {
+  const u = req.user || req.session?.user;
+  if (!u?.id) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+  req.user = u; // map ให้ downstream ใช้ req.user ได้เสมอ
+  next();
+}
 
 const router = Router();
 
-router.get("/", requireAuth, getProfileController);
-router.patch("/", requireAuth, updateProfileController);
-router.post("/signature", requireAuth, saveSignatureController);
+// Avatar
+router.put("/profile/avatar", requireAuth, uploadAvatarSingle, uploadAvatarController);
+router.get("/profile/files/user/avatar/:id", getAvatarFileController);
 
-// อัปโหลด avatar (field: "avatar")
-router.put(
-  "/avatar",
-  requireAuth,
-  (req, res, next) => {
-    uploadAvatarSingle(req, res, (err) => {
-      if (err) return res.status(400).json({ ok: false, error: err.message });
-      next();
-    });
-  },
-  uploadAvatarController
-);
-
-// เสิร์ฟไฟล์ avatar ของ user ตาม id
-router.get("/avatar/:id", requireAuth, getAvatarFileController);
+// Signature
+router.put("/profile/signature", requireAuth, uploadSignatureSingle, uploadSignatureController);
+router.get("/profile/files/user/signature/:id", getSignatureFileController);
 
 export default router;

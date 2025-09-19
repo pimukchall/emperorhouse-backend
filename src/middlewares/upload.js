@@ -1,28 +1,27 @@
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { AVATAR_BASE } from '../config/paths.js';
+import multer from "multer";
 
-const ACCEPTED = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // ยังไม่รู้ userId จนกว่าจะถึง handler ⇒ เก็บไฟล์ชั่วคราวที่โฟลเดอร์ avatar root
-    cb(null, AVATAR_BASE);
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase() || '.bin';
-    cb(null, `temp-${Date.now()}${ext}`);
+// ใช้ memory storage เพื่อให้ controller จัดการเส้นทางปลายทาง (ต่อ user) เอง
+const storage = multer.memoryStorage();
+
+function fileFilter(_req, file, cb) {
+  if (!ACCEPTED.has(file.mimetype)) {
+    return cb(new Error("Only jpeg/png/webp/gif allowed"));
   }
-});
+  cb(null, true);
+}
 
+// upload สำหรับ avatar (จำกัด 2MB)
 export const uploadAvatarSingle = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (_req, file, cb) => {
-    if (!ACCEPTED.has(file.mimetype)) {
-      return cb(new Error('Only jpeg/png/webp allowed'));
-    }
-    cb(null, true);
-  }
-}).single('avatar'); // ฟิลด์ชื่อ 'avatar'
+  fileFilter,
+  limits: { fileSize: 2 * 1024 * 1024 },
+}).single("avatar");
+
+// upload สำหรับ signature (จำกัด 1MB)
+export const uploadSignatureSingle = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 1 * 1024 * 1024 },
+}).single("signature");

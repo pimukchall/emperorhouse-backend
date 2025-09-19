@@ -70,7 +70,7 @@ export function createApp() {
   app.use('/api/users/:id/departments', userDepartmentsChildRouter);
   app.use('/api/roles', rolesRouter);
   app.use('/api/departments', departmentsRouter);
-  app.use('/api/files', filesRouter);
+  app.use(filesRouter);
    app.use('/api/contacts', contactsRouter);
 
   // health
