@@ -1,71 +1,47 @@
-// สิทธิ์และเครื่องมือช่วยเช็ค role / ลำดับขั้น + แผนก
+// ----- Roles (ระบบใหม่: 'admin' | 'user') -----
 export function isAdmin(me) {
   return (me?.roleName || "").toLowerCase() === "admin";
 }
-export function isHR(me) {
-  return (me?.roleName || "").toLowerCase() === "hr";
+export function hasRole(me, name) {
+  return (me?.roleName || "").toLowerCase() === String(name).toLowerCase();
+}
+
+// ----- Position Levels (จาก primary dept): STAF, SVR, ASST, MANAGER, MD -----
+const LEVEL_RANK = { STAF:0, SVR:1, ASST:2, MANAGER:3, MD:4 };
+export function levelRank(me) {
+  const lv = String(me?.primaryLevel || "").toUpperCase();
+  return LEVEL_RANK[lv] ?? -1;
+}
+export function hasLevelAtLeast(me, minLevel) {
+  return levelRank(me) >= (LEVEL_RANK[String(minLevel).toUpperCase()] ?? 999);
 }
 export function isMD(me) {
-  return (me?.roleName || "").toLowerCase() === "md";
-}
-export function isHead(me) {
-  return (me?.roleName || "").toLowerCase() === "head";
-}
-export function isManager(me) {
-  return (me?.roleName || "").toLowerCase() === "manager";
+  return String(me?.primaryLevel || "").toUpperCase() === "MD";
 }
 
-// จัดลำดับขั้น (ยืดหยุ่น: ถ้าไม่มี role ที่ว่า ให้ถือว่าต่ำกว่า)
-const RANK = {
-  staff: 0,
-  supervisor: 1,
-  lead: 2,
-  head: 3,
-  manager: 4,
-  md: 5,
-  hr: 5,
-  admin: 999,
-};
-
-export function roleRank(me) {
-  const r = (me?.roleName || "").toLowerCase();
-  return RANK[r] ?? 0;
+// ----- Department helpers (ดูจากทุกแผนก active) -----
+function deptMatchList(list, codeOrId) {
+  if (!Array.isArray(list)) return false;
+  if (typeof codeOrId === "number") {
+    return list.some(d => Number(d.id) === Number(codeOrId));
+  }
+  if (typeof codeOrId === "string") {
+    const t = codeOrId.toLowerCase();
+    return list.some(d => String(d.code || "").toLowerCase() === t);
+  }
+  return false;
 }
 
-export function requireRoleAtLeast(minRoleName) {
-  const minRank = RANK[(minRoleName || "").toLowerCase()] ?? 0;
-  return (req, res, next) => {
-    const me = req.session?.user;
-    if (!me) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    if (roleRank(me) >= minRank) return next();
-    return res.status(403).json({ ok: false, error: "Forbidden" });
-  };
+/** อยู่ใน dept ที่กำหนดหรือไม่ (ดูทุกแผนก active) */
+export function inDepartmentAny(me, ...codesOrIds) {
+  const list = Array.isArray(me?.departments) ? me.departments : [];
+  return (codesOrIds || []).some(v => deptMatchList(list, v));
 }
 
-// ใช้กั้นเฉพาะ role ตรง ๆ
-export function requireRole(...names) {
-  const allow = new Set(names.map((n) => String(n).toLowerCase()));
-  return (req, res, next) => {
-    const me = req.session?.user;
-    if (!me) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    if (allow.has((me.roleName || "").toLowerCase()) || isAdmin(me))
-      return next();
-    return res.status(403).json({ ok: false, error: "Forbidden" });
-  };
+/** ยังคงรองรับฟังก์ชันเดิม เพื่อความเข้ากันได้ย้อนหลัง */
+export function inDepartment(me, codeOrId) {
+  return inDepartmentAny(me, codeOrId);
 }
-
-// เช็คว่า me อยู่แผนกเดียวกับ deptId (HR/MD/Admin ผ่าน)
-export function requireSameDepartmentOrHigher(req, res, next) {
-  const me = req.session?.user;
-  if (!me) return res.status(401).json({ ok: false, error: "Unauthorized" });
-  if (isAdmin(me) || isHR(me) || isMD(me)) return next();
-  const targetDeptId = Number(
-    req.body?.deptId ?? req.query?.deptId ?? req.params?.deptId
-  );
-  if (!targetDeptId)
-    return res.status(400).json({ ok: false, error: "deptId required" });
-  if (Number(me.departmentId) === Number(targetDeptId)) return next();
-  return res
-    .status(403)
-    .json({ ok: false, error: "Forbidden (department mismatch)" });
+export function inQMS(me) {
+  return inDepartmentAny(me, "QMS");
 }

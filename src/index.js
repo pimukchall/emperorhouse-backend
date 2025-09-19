@@ -1,53 +1,93 @@
+import 'dotenv/config';
 import express from 'express';
 import morgan from 'morgan';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import cookieSession from 'cookie-session';
+import cookieParser from 'cookie-parser';
+import session from 'express-session';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-import { router as healthRouter } from './routes/health.js';
-import { router as usersRouter } from './routes/users.js';
-import { router as authRouter } from './routes/auth.js';
-import { router as profileRouter } from './routes/profile.js';
-import { router as rolesRouter } from './routes/roles.js';
-import { router as departmentsRouter } from './routes/departments.js';
-import { router as contactRouter } from './routes/contact.js'
-import userDepartmentsRouter from "./routes/user-departments.js";
+// ----- routes -----
+import authRouter from './routes/auth.routes.js';
+import usersRouter from './routes/users.routes.js';
+import userDepartmentsChildRouter from './routes/user-departments.routes.js';
+import rolesRouter from './routes/roles.routes.js';
+import departmentsRouter from './routes/departments.routes.js';
+import filesRouter from './routes/files.routes.js';
+import contactsRouter from './routes/contacts.routes.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-const app = express();
+export function createApp() {
+  const app = express();
 
-app.use(cors({
-  origin: ["http://localhost:3000", "https://your-frontend.app"],
-  credentials: true
-}));
+  // CORS
+  app.use(
+    cors({
+      origin: process.env.FRONTEND_BASE_URL || 'http://localhost:3000',
+      credentials: true,
+    })
+  );
 
-app.use(express.json({ limit: "1mb" }));
-app.use(morgan('dev'));
+  // parsers
+  app.use(express.json({ limit: '5mb' }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use(cookieParser());
 
-app.use(cookieSession({
-  name: process.env.SESSION_NAME || 'sid',
-  secret: process.env.SESSION_SECRET,
-  // จะเซ็ต maxAge ตาม remember ที่ /auth/login
-  maxAge: undefined,
-  httpOnly: true,
-  sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
-  domain: process.env.SESSION_DOMAIN || undefined,
-}));
+  // session (สำหรับ req.session.user)
+  app.use(
+    session({
+      secret: process.env.SESSION_SECRET || 'dev-session-secret',
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.COOKIE_SECURE === 'true',
+        maxAge: 7 * 24 * 3600 * 1000,
+      },
+    })
+  );
 
-app.use('/health', healthRouter);
-app.use('/api/users', usersRouter);
-app.use('/auth', authRouter);
-app.use('/profile', profileRouter);
-app.use('/api/roles', rolesRouter);
-app.use('/api/departments', departmentsRouter);
-app.use("/api/contacts", contactRouter);
-app.use('/api/users/:id/departments', userDepartmentsRouter);
+  app.use(morgan('dev'));
 
-app.use((_req, res) => res.status(404).send('Not Found'));
+  // static files (อิง env: UPLOADS_DIR) -> /files/**
+  const ENV_UPLOADS = process.env.UPLOADS_DIR;
+  const UPLOAD_BASE = ENV_UPLOADS
+    ? (path.isAbsolute(ENV_UPLOADS) ? ENV_UPLOADS : path.resolve(PROJECT_ROOT, ENV_UPLOADS))
+    : path.resolve(PROJECT_ROOT, '..', 'upload');
+  const AVATAR_BASE = path.join(UPLOAD_BASE, 'avatars');
+  for (const p of [UPLOAD_BASE, AVATAR_BASE]) fs.mkdirSync(p, { recursive: true });
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+  app.use('/files', express.static(UPLOAD_BASE));
+
+  // mount routes (ครั้งเดียว)
+  app.use('/auth', authRouter);
+  app.use('/api/users', usersRouter);
+  app.use('/api/users/:id/departments', userDepartmentsChildRouter);
+  app.use('/api/roles', rolesRouter);
+  app.use('/api/departments', departmentsRouter);
+  app.use('/api/files', filesRouter);
+   app.use('/api/contacts', contactsRouter);
+
+  // health
+  app.get('/', (_req, res) => res.json({ ok: true }));
+
+  return app;
+}
+
+// สร้างแอปและ export ให้เทสใช้
+const app = createApp();
+export { app };
+export default app;
+
+// start server เมื่อไม่ใช่โหมด test
+const PORT = Number(process.env.PORT || 4000);
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`API running on ${PORT}`);
+  });
+}
