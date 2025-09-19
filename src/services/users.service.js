@@ -178,19 +178,23 @@ export async function createUserService({ prisma, data }) {
     departmentId,
   } = data;
 
-  if (!email || !password || !roleId || !firstNameTh || !lastNameTh || !firstNameEn || !lastNameEn) {
+  // บังคับเฉพาะที่จำเป็นจริง ๆ
+  if (!email || !password || !roleId) {
     throw new Error("missing required user fields");
   }
   if (!departmentId) {
     throw new Error("departmentId required for primary assignment");
   }
 
+  const exists = await prisma.user.findFirst({ where: { email } });
+  if (exists) {
+    throw new Error("Email already in use");
+  }
+
   // normalize ENUMs ก่อน เพื่อใช้ตัดสินใจ gen code
   const _contractType = normEnum(contractType, CONTRACT_TYPES);
 
   // ตัดสินใจรหัสพนักงาน:
-  // - ถ้าส่งมาเอง → ต้องไม่ซ้ำ
-  // - ถ้าไม่ส่ง → gen ตามสเป็ค (PERMANENT = YYSS, อื่น ๆ = C-YYSS)
   let finalEmpCode = safeStr(employeeCode, { allowNull: true }) ?? null;
   if (finalEmpCode && String(finalEmpCode).trim() !== "") {
     await assertEmployeeCodeUnique(prisma, finalEmpCode);
@@ -212,12 +216,14 @@ export async function createUserService({ prisma, data }) {
         roleId: Number(roleId),
         orgId: orgId ? Number(orgId) : null,
 
+        // ✅ ฟิลด์ที่ schema เป็น required ต้องส่งสตริงเสมอ (ไม่ใช่ undefined)
         name: safeStr(name, { allowNull: false }) ?? "",
-        firstNameTh: safeStr(firstNameTh, { allowNull: false }),
-        lastNameTh: safeStr(lastNameTh, { allowNull: false }),
-        firstNameEn: safeStr(firstNameEn, { allowNull: false }),
-        lastNameEn: safeStr(lastNameEn, { allowNull: false }),
+        firstNameTh: safeStr(firstNameTh, { allowNull: false }) ?? "",
+        lastNameTh: safeStr(lastNameTh, { allowNull: false }) ?? "",
+        firstNameEn: safeStr(firstNameEn, { allowNull: false }) ?? "",
+        lastNameEn: safeStr(lastNameEn, { allowNull: false }) ?? "",
 
+        // optional/nullable
         employeeCode: finalEmpCode,
         employeeType: normEnum(employeeType, EMPLOYEE_TYPES),
         contractType: _contractType,

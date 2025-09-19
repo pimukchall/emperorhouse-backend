@@ -96,7 +96,7 @@ model User {
 
   // Login identity
   name         String @default("")
-  email        String
+  email        String @unique
   passwordHash String
 
   // Names

@@ -77,7 +77,7 @@ export async function registerService({ prisma, payload }) {
   }
 
   const dup = await prisma.user.findFirst({ where: { email, deletedAt: null }, select: { id: true } });
-  if (dup) throw new Error("EMAIL_TAKEN");
+  if (dup) throw new Error("Email already in use");
 
   const roleUser = await prisma.role.findUnique({ where: { name: "user" } });
   if (!roleUser) throw new Error("ROLE_USER_MISSING");
