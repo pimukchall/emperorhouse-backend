@@ -16,6 +16,7 @@ import rolesRouter from './routes/roles.routes.js';
 import departmentsRouter from './routes/departments.routes.js';
 import filesRouter from './routes/files.routes.js';
 import contactsRouter from './routes/contacts.routes.js';
+import organizationsRouter from "./routes/organizations.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,7 +72,8 @@ export function createApp() {
   app.use('/api/roles', rolesRouter);
   app.use('/api/departments', departmentsRouter);
   app.use(filesRouter);
-   app.use('/api/contacts', contactsRouter);
+  app.use('/api/contacts', contactsRouter);
+  app.use('api/organizations',organizationsRouter);
 
   // health
   app.get('/', (_req, res) => res.json({ ok: true }));

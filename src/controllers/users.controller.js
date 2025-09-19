@@ -1,4 +1,3 @@
-// src/controllers/users.controller.js
 import { prisma } from "../prisma.js";
 import {
   listUsersService,
@@ -6,7 +5,8 @@ import {
   createUserService,
   updateUserService,
   softDeleteUserService,
-  setPrimaryDepartmentService, // <-- ใช้ service ชื่อนี้จาก services/users.service.js
+  setPrimaryDepartmentService,
+  restoreUserService,
 } from "../services/users.service.js";
 
 function toInt(v) {
@@ -68,6 +68,9 @@ export async function createUserController(req, res) {
     res.status(201).json({ ok: true, data: created });
   } catch (e) {
     const msg = String(e?.message || e);
+    if (/EMPLOYEE_CODE_EXISTS/.test(msg)) {
+      return res.status(409).json({ ok: false, error: "EMPLOYEE_CODE_EXISTS" });
+    }
     if (/unique/i.test(msg) || /P2002/.test(msg)) {
       return res.status(409).json({ ok: false, error: "EMAIL_EXISTS" });
     }
@@ -84,6 +87,9 @@ export async function updateUserController(req, res) {
     res.json({ ok: true, data: updated });
   } catch (e) {
     const msg = String(e?.message || e);
+    if (/EMPLOYEE_CODE_EXISTS/.test(msg)) {
+      return res.status(409).json({ ok: false, error: "EMPLOYEE_CODE_EXISTS" });
+    }
     if (/P2025/.test(msg)) return res.status(404).json({ ok: false, error: "USER_NOT_FOUND" });
     if (/unique/i.test(msg) || /P2002/.test(msg)) {
       return res.status(409).json({ ok: false, error: "EMAIL_EXISTS" });
@@ -100,6 +106,7 @@ export async function softDeleteUserController(req, res) {
 
     const hard = String(req.query.hard || "") === "1";
     if (hard) {
+      await prisma.userDepartment.deleteMany({ where: { userId: id } });
       await prisma.user.delete({ where: { id } });
     } else {
       await softDeleteUserService({ prisma, id });
@@ -127,5 +134,17 @@ export async function setPrimaryDepartmentController(req, res) {
       return res.status(404).json({ ok: false, error: "USER_OR_ASSIGNMENT_NOT_FOUND" });
     }
     res.status(400).json({ ok: false, error: msg });
+  }
+}
+
+// ✅ POST /api/users/:id/restore
+export async function restoreUserController(req, res) {
+  try {
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "INVALID_ID" });
+    await restoreUserService({ prisma, id });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
 }
