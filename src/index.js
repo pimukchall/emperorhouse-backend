@@ -7,6 +7,7 @@ import session from 'express-session';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import jwt from 'jsonwebtoken';
 
 // ----- routes -----
 import authRouter from './routes/auth.routes.js';
@@ -17,6 +18,7 @@ import departmentsRouter from './routes/departments.routes.js';
 import filesRouter from './routes/files.routes.js';
 import contactsRouter from './routes/contacts.routes.js';
 import organizationsRouter from "./routes/organizations.routes.js";
+import profileRouter from "./routes/profile.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +26,11 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 export function createApp() {
   const app = express();
+
+  // ถ้ารันหลัง reverse proxy (เช่น NGINX/Vercel/Caddy)
+  if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+  }
 
   // CORS
   app.use(
@@ -37,6 +44,28 @@ export function createApp() {
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
+
+  // --- JWT guard: เติม req.user/req.userId/req.auth จาก access token ---
+  const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'dev-access-secret';
+  app.use((req, _res, next) => {
+    try {
+      // รองรับทั้ง Authorization: Bearer <token> และ cookie ที่ controller ตั้งไว้
+      const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      const token =
+        bearer ||
+        req.cookies?.access_token ||
+        req.cookies?.accessToken ||
+        req.cookies?.ACCESS_TOKEN;
+
+      if (token) {
+        const payload = jwt.verify(token, JWT_ACCESS_SECRET);
+        req.user = { id: Number(payload?.sub) || null, role: payload?.role || null };
+        req.userId = req.user.id;
+        req.auth = payload;
+      }
+    } catch {}
+    next();
+  });
 
   // session (สำหรับ req.session.user)
   app.use(
@@ -74,6 +103,7 @@ export function createApp() {
   app.use(filesRouter);
   app.use('/api/contacts', contactsRouter);
   app.use("/api/organizations", organizationsRouter);
+  app.use("/api/profile", profileRouter);
 
   // health
   app.get('/', (_req, res) => res.json({ ok: true }));

@@ -2,14 +2,20 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import { sendMail, makeResetLink, renderForgotPasswordEmail, renderPasswordChangedEmail } from "../lib/mailer.js";
+import {
+  sendMail,
+  makeResetLink,
+  renderForgotPasswordEmail,
+  renderPasswordChangedEmail,
+} from "../lib/mailer.js";
+import { genEmployeeCode } from "./users.service.js"; // ใช้ generator เลขพนักงาน
 
-const ACCESS_TTL_SEC  = Number(process.env.ACCESS_TTL_SEC  || 15 * 60);     // 15 นาที
+const ACCESS_TTL_SEC = Number(process.env.ACCESS_TTL_SEC || 15 * 60); // 15 นาที
 const REFRESH_TTL_SEC = Number(process.env.REFRESH_TTL_SEC || 7 * 24 * 3600); // 7 วัน
-const JWT_ACCESS_SECRET  = process.env.JWT_ACCESS_SECRET  || "dev-access-secret";
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev-access-secret";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-refresh-secret";
 
-/** -------- helpers (token) -------- */
+/* ---------------- Token helpers ---------------- */
 export function signAccessToken(payload) {
   return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: ACCESS_TTL_SEC });
 }
@@ -20,18 +26,18 @@ export function verifyRefreshToken(token) {
   return jwt.verify(token, JWT_REFRESH_SECRET);
 }
 
-/** คืนข้อมูล user แบบปลอดภัยสำหรับ session/me */
+/* ---------------- Session shaping ---------------- */
 function toSessionUser(u) {
   return {
     id: u.id,
     email: u.email,
     roleName: u.role?.name || null,
-    // primary dept (ถ้ามี)
+    // primary dept snapshot
     primaryDeptId: u.primaryUserDept?.department?.id ?? null,
     primaryDeptCode: u.primaryUserDept?.department?.code ?? null,
     primaryLevel: u.primaryUserDept?.positionLevel ?? null,
     primaryPosition: u.primaryUserDept?.positionName ?? null,
-    // รายชื่อแผนกที่ active ทั้งหมด (ให้ middleware ใช้)
+    // active departments for middleware
     departments: (u.userDepartments || []).map((ud) => ({
       id: ud.department.id,
       code: ud.department.code,
@@ -43,91 +49,124 @@ function toSessionUser(u) {
   };
 }
 
-/** ดึง user + role + primary dept + all active depts */
 async function getUserForSession(prisma, id) {
   return prisma.user.findFirst({
     where: { id, deletedAt: null },
     select: {
-      id: true, email: true,
+      id: true,
+      email: true,
       role: { select: { name: true } },
       primaryUserDept: {
         select: {
-          positionLevel: true, positionName: true,
-          department: { select: { id: true, code: true, nameTh: true, nameEn: true } }
-        }
+          positionLevel: true,
+          positionName: true,
+          department: {
+            select: { id: true, code: true, nameTh: true, nameEn: true },
+          },
+        },
       },
       userDepartments: {
         where: { endedAt: null },
         select: {
-          positionLevel: true, positionName: true,
-          department: { select: { id: true, code: true, nameTh: true, nameEn: true } }
-        }
-      }
-    }
+          positionLevel: true,
+          positionName: true,
+          department: {
+            select: { id: true, code: true, nameTh: true, nameEn: true },
+          },
+        },
+      },
+    },
   });
 }
 
-/** -------- register --------
- * สร้างผู้ใช้ใหม่ (role = user), เข้าสู่ระบบให้เลย, คืน access/refresh
- */
+/* ---------------- Register ---------------- */
+// ใช้กับ controller ที่เรียก registerService({ prisma, payload: req.body })
 export async function registerService({ prisma, payload }) {
-  const { email, password, firstNameTh, lastNameTh, firstNameEn = "", lastNameEn = "", orgId = null } = payload || {};
-  if (!email || !password || !firstNameTh || !lastNameTh) {
-    throw new Error("MISSING_REQUIRED_FIELDS");
+  const email = String(payload?.email ?? "").trim();
+  const password = String(payload?.password ?? "").trim();
+  const name = String(payload?.name ?? "").trim(); // optional
+
+  if (!email || !password) {
+    if (!email && !password) throw new Error("missing email and password");
+    if (!email) throw new Error("missing email");
+    throw new Error("missing password");
   }
 
-  const dup = await prisma.user.findFirst({ where: { email, deletedAt: null }, select: { id: true } });
-  if (dup) throw new Error("Email already in use");
-
-  const roleUser = await prisma.role.findUnique({ where: { name: "user" } });
-  if (!roleUser) throw new Error("ROLE_USER_MISSING");
+  // ป้องกันอีเมลซ้ำ
+  const exists = await prisma.user.findFirst({ where: { email } });
+  if (exists) throw new Error("Email already in use");
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  const created = await prisma.user.create({
-    data: {
-      email,
-      passwordHash,
-      firstNameTh, lastNameTh,
-      firstNameEn, lastNameEn,
-      roleId: roleUser.id,
-      orgId,
-      // fields อื่น ๆ ให้ปรับเพิ่มที่หน้า Profile ภายหลัง
-      name: `${firstNameEn} ${lastNameEn}`.trim(),
-      startDate: new Date(),
-    },
-    select: { id: true }
+  // ใช้ transaction กัน race ตอน gen employeeCode
+  const created = await prisma.$transaction(async (tx) => {
+    // สมัคร user ขั้นต้น
+    const u = await tx.user.create({
+      data: {
+        email,
+        passwordHash,
+        name,
+        roleId: 2, // กำหนด default role = user (id=2)
+        firstNameTh: payload.firstNameTh ?? "",
+        lastNameTh: payload.lastNameTh ?? "",
+        firstNameEn: payload.firstNameEn ?? "",
+        lastNameEn: payload.lastNameEn ?? "",
+      },
+    });
+
+    // ถ้าไม่มี employeeCode ให้ gen เริ่มต้น (default ตาม genEmployeeCode → fallback = "C-")
+    if (!u.employeeCode || String(u.employeeCode).trim() === "") {
+      const empCode = await genEmployeeCode(tx, null);
+      await tx.user.update({
+        where: { id: u.id },
+        data: { employeeCode: empCode },
+      });
+    }
+
+    // ส่งกลับพร้อมความสัมพันธ์ที่ frontend ใช้
+    return tx.user.findUnique({
+      where: { id: u.id },
+      include: {
+        role: true,
+        organization: true,
+        primaryUserDept: { include: { department: true } },
+        userDepartments: { include: { department: true } },
+      },
+    });
   });
 
-  const u = await getUserForSession(prisma, created.id);
-  const sessionUser = toSessionUser(u);
-
-  const accessToken  = signAccessToken({ sub: u.id, role: u.role?.name || "user" });
-  const refreshToken = signRefreshToken({ sub: u.id });
-
-  return { sessionUser, tokens: { accessToken, refreshToken, accessExp: ACCESS_TTL_SEC, refreshExp: REFRESH_TTL_SEC } };
+  return created;
 }
 
-/** -------- login -------- */
+/* ---------------- Login ---------------- */
 export async function loginService({ prisma, email, password }) {
   const user = await prisma.user.findFirst({
     where: { email, deletedAt: null },
-    select: { id: true, passwordHash: true, role: { select: { name: true } } }
+    select: { id: true, passwordHash: true, role: { select: { name: true } } },
   });
   if (!user) throw new Error("LOGIN_FAILED");
+
   const ok = await bcrypt.compare(password || "", user.passwordHash || "");
   if (!ok) throw new Error("LOGIN_FAILED");
 
   const u = await getUserForSession(prisma, user.id);
   const sessionUser = toSessionUser(u);
 
-  const accessToken  = signAccessToken({ sub: u.id, role: u.role?.name || "user" });
+  const accessToken = signAccessToken({ sub: u.id, role: u.role?.name || "user" });
   const refreshToken = signRefreshToken({ sub: u.id });
 
-  return { sessionUser, tokens: { accessToken, refreshToken, accessExp: ACCESS_TTL_SEC, refreshExp: REFRESH_TTL_SEC } };
+  return {
+    sessionUser,
+    tokens: {
+      accessToken,
+      refreshToken,
+      accessExp: ACCESS_TTL_SEC,
+      refreshExp: REFRESH_TTL_SEC,
+    },
+  };
 }
 
-/** -------- refresh -------- */
+/* ---------------- Refresh ---------------- */
 export async function refreshService({ prisma, refreshToken }) {
   const decoded = verifyRefreshToken(refreshToken);
   const id = decoded?.sub;
@@ -137,18 +176,26 @@ export async function refreshService({ prisma, refreshToken }) {
   if (!u) throw new Error("USER_NOT_FOUND");
 
   const sessionUser = toSessionUser(u);
-  const accessToken  = signAccessToken({ sub: u.id, role: u.role?.name || "user" });
-  const newRefresh   = signRefreshToken({ sub: u.id });
+  const accessToken = signAccessToken({ sub: u.id, role: u.role?.name || "user" });
+  const newRefresh = signRefreshToken({ sub: u.id });
 
-  return { sessionUser, tokens: { accessToken, refreshToken: newRefresh, accessExp: ACCESS_TTL_SEC, refreshExp: REFRESH_TTL_SEC } };
+  return {
+    sessionUser,
+    tokens: {
+      accessToken,
+      refreshToken: newRefresh,
+      accessExp: ACCESS_TTL_SEC,
+      refreshExp: REFRESH_TTL_SEC,
+    },
+  };
 }
 
-/** -------- logout -------- */
+/* ---------------- Logout ---------------- */
 export async function logoutService() {
   return { ok: true };
 }
 
-/** -------- forgot / reset / change password -------- */
+/* ---------------- Forgot / Reset / Change password ---------------- */
 export async function forgotPasswordService({ prisma, email }) {
   const user = await prisma.user.findFirst({
     where: { email, deletedAt: null },
@@ -157,10 +204,8 @@ export async function forgotPasswordService({ prisma, email }) {
 
   if (user) {
     const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-    await prisma.passwordReset.create({
-      data: { userId: user.id, token, expiresAt },
-    });
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 นาที
+    await prisma.passwordReset.create({ data: { userId: user.id, token, expiresAt } });
 
     const resetUrl = makeResetLink(token);
     const { subject, html, text } = renderForgotPasswordEmail({
@@ -168,28 +213,20 @@ export async function forgotPasswordService({ prisma, email }) {
       resetUrl,
     });
 
-    try { await sendMail({ to: user.email, subject, html, text }); } catch (_) {}
+    try {
+      await sendMail({ to: user.email, subject, html, text });
+    } catch {}
   }
   return { ok: true };
 }
 
 export async function resetPasswordService({ prisma, token, newPassword }) {
-  if (!token || !newPassword) {
-    throw new Error("TOKEN_OR_PASSWORD_REQUIRED");
-  }
+  if (!token || !newPassword) throw new Error("TOKEN_OR_PASSWORD_REQUIRED");
 
-  // หา record โทเค็น
   const rec = await prisma.passwordReset.findUnique({
     where: { token },
     include: {
-      user: {
-        select: {
-          id: true,
-          email: true,
-          firstNameTh: true,
-          firstNameEn: true,
-        },
-      },
+      user: { select: { id: true, email: true, firstNameTh: true, firstNameEn: true } },
     },
   });
 
@@ -199,42 +236,22 @@ export async function resetPasswordService({ prisma, token, newPassword }) {
     throw new Error("TOKEN_EXPIRED");
   }
 
-  // hash password ใหม่
   const hash = await bcrypt.hash(newPassword, 10);
 
-  // อัปเดตภายใน transaction เดียว
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: rec.userId },
-      data: { passwordHash: hash },
-    });
-
-    await tx.passwordReset.update({
-      where: { token },
-      data: { usedAt: new Date() },
-    });
-
-    // (ออปชัน) ทำให้โทเค็นรีเซ็ตคงค้างของ user เดียวกันหมดอายุ/ใช้ไม่ได้
+    await tx.user.update({ where: { id: rec.userId }, data: { passwordHash: hash } });
+    await tx.passwordReset.update({ where: { token }, data: { usedAt: new Date() } });
     await tx.passwordReset.updateMany({
-      where: {
-        userId: rec.userId,
-        usedAt: null,
-        NOT: { token },
-      },
-      data: {
-        expiresAt: new Date(0), // หมดอายุย้อนหลัง
-      },
+      where: { userId: rec.userId, usedAt: null, NOT: { token } },
+      data: { expiresAt: new Date(0) },
     });
   });
 
-  // ส่งอีเมลแจ้ง password ถูกเปลี่ยน (ไม่ให้ล้ม flow ถ้าส่งอีเมลล้มเหลว)
   try {
     const name = rec.user.firstNameTh || rec.user.firstNameEn || "";
     const { subject, html, text } = renderPasswordChangedEmail({ name });
     await sendMail({ to: rec.user.email, subject, html, text });
-  } catch {
-    // เงียบ ๆ ไม่ throw เพื่อไม่ให้กระทบผู้ใช้
-  }
+  } catch {}
 
   return { ok: true };
 }
@@ -261,35 +278,51 @@ export async function changePasswordService({ prisma, userId, currentPassword, n
       name: user.firstNameTh || user.firstNameEn || "",
     });
     await sendMail({ to: user.email, subject, html, text });
-  } catch (_) {}
+  } catch {}
 
   return { ok: true };
 }
 
-/** -------- me -------- */
+/* ---------------- Me ---------------- */
 export async function meService({ prisma, userId }) {
   const u = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },
     select: {
-      id: true, email: true, name: true, avatarPath: true,
+      id: true,
+      email: true,
+      name: true,
+      avatarPath: true,
       role: { select: { name: true, labelTh: true, labelEn: true } },
       organization: { select: { id: true, code: true, nameTh: true, nameEn: true } },
       primaryUserDept: {
         select: {
-          id: true, positionLevel: true, positionName: true,
-          department: { select: { id: true, code: true, nameTh: true, nameEn: true } }
-        }
+          id: true,
+          positionLevel: true,
+          positionName: true,
+          department: {
+            select: { id: true, code: true, nameTh: true, nameEn: true },
+          },
+        },
       },
       userDepartments: {
         where: { endedAt: null },
         select: {
-          positionLevel: true, positionName: true,
-          department: { select: { id: true, code: true, nameTh: true, nameEn: true } }
-        }
+          positionLevel: true,
+          positionName: true,
+          department: {
+            select: { id: true, code: true, nameTh: true, nameEn: true },
+          },
+        },
       },
-      employeeCode: true, employeeType: true, contractType: true,
-      startDate: true, probationEndDate: true, resignedAt: true, birthDate: true, gender: true,
-    }
+      employeeCode: true,
+      employeeType: true,
+      contractType: true,
+      startDate: true,
+      probationEndDate: true,
+      resignedAt: true,
+      birthDate: true,
+      gender: true,
+    },
   });
   if (!u) throw new Error("USER_NOT_FOUND");
   return u;

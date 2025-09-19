@@ -1,15 +1,17 @@
 import jwt from "jsonwebtoken";
-import { prisma } from '../prisma.js';
+import { prisma } from "../prisma.js";
 
-/** helper: verify token ด้วย secret หลายชุด (รองรับ legacy/new) */
+/* ---------------- helpers: read/verify token ---------------- */
 function tryVerifyAccess(token) {
   const secrets = [
-    process.env.JWT_ACCESS_SECRET,       // ใช้ใน services/auth.service.js
-    process.env.ACCESS_TOKEN_SECRET,     // ใช้ใน src/auth/tokens.js
+    process.env.JWT_ACCESS_SECRET,
+    process.env.ACCESS_TOKEN_SECRET, // เผื่อ legacy
   ].filter(Boolean);
 
-  for (const secret of secrets) {
-    try { return jwt.verify(token, secret); } catch {}
+  for (const s of secrets) {
+    try {
+      return jwt.verify(token, s);
+    } catch {}
   }
   return null;
 }
@@ -18,63 +20,124 @@ function readBearer(req) {
   const m = /^Bearer\s+(.+)$/i.exec(h);
   return m?.[1] || null;
 }
+function readAccessCookie(req) {
+  return (
+    req.cookies?.access_token ||
+    req.cookies?.accessToken ||
+    req.cookies?.ACCESS_TOKEN ||
+    null
+  );
+}
 
-/** ต้องล็อกอิน: ยอมรับทั้ง session หรือ Bearer */
-export async function requireAuth(req, res, next) {
-  // 1) session ก่อน
-  if (req.session?.user?.id) return next();
-
-  // 2) ถ้าไม่มี session ลอง Bearer
-  const token = readBearer(req);
-  if (token) {
-    const decoded = tryVerifyAccess(token);
-    const uid = decoded?.sub || decoded?.uid;
-    if (uid) {
-      const u = await prisma.user.findFirst({
-        where: { id: Number(uid), deletedAt: null },
-        select: {
-          id: true, email: true, name: true,
-          role: { select: { id: true, name: true, labelTh: true, labelEn: true } },
-          department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
-        }
-      });
-      if (u) {
-        // เติมลง session เพื่อให้ middleware อื่น ๆ ใช้ร่วมกันได้
-        req.session.user = {
-          id: u.id,
-          email: u.email,
-          name: u.name,
-          roleName: u.role?.name || "user",
-        };
-        return next();
-      }
+/* ---------------- identity resolver ---------------- */
+function resolveIdentityFromReq(req) {
+  // 1) session
+  if (req.session?.user?.id) {
+    return { uid: Number(req.session.user.id) || null, roleFromToken: null, payload: null };
+  }
+  // 2) bearer
+  const bearer = readBearer(req);
+  if (bearer) {
+    const dec = tryVerifyAccess(bearer);
+    if (dec?.sub || dec?.uid) {
+      return { uid: Number(dec.sub || dec.uid) || null, roleFromToken: dec.role || null, payload: dec };
     }
   }
-  return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  // 3) cookie
+  const token = readAccessCookie(req);
+  if (token) {
+    const dec = tryVerifyAccess(token);
+    if (dec?.sub || dec?.uid) {
+      return { uid: Number(dec.sub || dec.uid) || null, roleFromToken: dec.role || null, payload: dec };
+    }
+  }
+  return { uid: null, roleFromToken: null, payload: null };
 }
 
-function matchRole(user, expected) {
-  const rn = String(user?.roleName || "").toLowerCase();
-  return rn === String(expected).toLowerCase();
+/* ---------------- middlewares ---------------- */
+export async function requireAuth(req, res, next) {
+  const { uid, roleFromToken, payload } = resolveIdentityFromReq(req);
+  if (!uid) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+
+  // NOTE: ห้าม select user.department (ไม่มีใน schema แล้ว)
+  const u = await prisma.user.findFirst({
+    where: { id: Number(uid), deletedAt: null },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: { select: { id: true, name: true, labelTh: true, labelEn: true } },
+      // ใช้ primaryUserDept.department แทน
+      primaryUserDept: {
+        select: {
+          positionLevel: true,
+          positionName: true,
+          department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
+        },
+      },
+    },
+  });
+
+  if (!u) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+
+  const roleName = roleFromToken || u.role?.name || "user";
+  const primaryDept = u.primaryUserDept?.department || null;
+
+  // context แบบใหม่
+  req.user = { id: u.id, role: roleName };
+  req.userId = u.id;
+  req.auth = payload || { sub: u.id, role: roleName };
+
+  // sync snapshot ให้โค้ดเดิมที่อ่าน session
+  req.session.user = {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    roleName,
+    // map department เก่าจาก primary dept ใหม่ (ถ้าอยากให้โค้ดเก่ายังใช้ได้)
+    department: primaryDept
+      ? {
+          id: primaryDept.id,
+          code: primaryDept.code,
+          nameTh: primaryDept.nameTh,
+          nameEn: primaryDept.nameEn,
+        }
+      : undefined,
+    primaryDeptId: primaryDept?.id ?? null,
+    primaryDeptCode: primaryDept?.code ?? null,
+    primaryLevel: u.primaryUserDept?.positionLevel ?? null,
+    primaryPosition: u.primaryUserDept?.positionName ?? null,
+  };
+
+  return next();
 }
 
-/** ต้องมี role ตามที่กำหนดอย่างน้อยหนึ่ง (case-insensitive) */
 export function requireRole(...roles) {
   return (req, res, next) => {
-    const rn = String(req.session?.user?.roleName || "").toLowerCase();
-    const ok = roles.some((r) => rn === String(r).toLowerCase());
-    if (!ok) return res.status(403).json({ ok: false, error: 'Forbidden' });
+    const got = String(
+      req.user?.role || req.auth?.role || req.session?.user?.roleName || ""
+    ).toLowerCase();
+    const ok = roles.some((r) => got === String(r || "").toLowerCase());
+    if (!ok) return res.status(403).json({ ok: false, error: "FORBIDDEN" });
     next();
   };
 }
 
-/** เติมข้อมูล me ล่าสุดลง req.me + sync บางคีย์เข้า session.user */
 export async function requireMe(req, _res, next) {
-  if (req.session?.user?.id) {
+  const uid =
+    req.session?.user?.id ||
+    req.user?.id ||
+    req.userId ||
+    req.auth?.sub ||
+    null;
+
+  if (uid) {
     const me = await prisma.user.findFirst({
-      where: { id: req.session.user.id, deletedAt: null },
+      where: { id: Number(uid), deletedAt: null },
       select: {
-        id: true, email: true, name: true,
+        id: true,
+        email: true,
+        name: true,
         role: { select: { name: true } },
         userDepartments: {
           where: { endedAt: null },
@@ -84,10 +147,18 @@ export async function requireMe(req, _res, next) {
             department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
           },
         },
+        primaryUserDept: {
+          select: {
+            positionLevel: true,
+            positionName: true,
+            department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
+          },
+        },
       },
     });
+
     if (me) {
-      const primary = me.userDepartments?.[0];
+      const primary = me.primaryUserDept || me.userDepartments?.[0] || null;
       req.me = {
         id: me.id,
         email: me.email,
@@ -97,12 +168,17 @@ export async function requireMe(req, _res, next) {
         primaryDeptCode: primary?.department?.code ?? null,
         primaryLevel: primary?.positionLevel ?? null,
         primaryPosition: primary?.positionName ?? null,
-        departments: (me.userDepartments || []).map(d => ({
-          code: d.department?.code, nameTh: d.department?.nameTh, nameEn: d.department?.nameEn
+        departments: (me.userDepartments || []).map((d) => ({
+          id: d.department?.id,
+          code: d.department?.code,
+          nameTh: d.department?.nameTh,
+          nameEn: d.department?.nameEn,
         })),
       };
+
+      // sync ส่วนสำคัญเข้า session (เผื่อโค้ดเก่า)
       req.session.user = {
-        ...req.session.user,
+        ...(req.session.user || {}),
         roleName: req.me.roleName,
         primaryDeptId: req.me.primaryDeptId,
         primaryDeptCode: req.me.primaryDeptCode,

@@ -5,146 +5,122 @@ import {
   createUserService,
   updateUserService,
   softDeleteUserService,
-  setPrimaryDepartmentService,
   restoreUserService,
+  setPrimaryDepartmentService,
 } from "../services/users.service.js";
 
-function toInt(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+/* ----------------------------- Helpers ----------------------------- */
+function bool(v, def = false) {
+  if (v === undefined || v === null) return def;
+  const s = String(v).trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
 }
+function sendError(res, e, fallback = 400) {
+  const msg = e?.message || "UNKNOWN_ERROR";
+  const status =
+    e?.status ??
+    (msg === "USER_NOT_FOUND" ? 404 :
+     msg === "DUPLICATE_EMPLOYEE_CODE" ? 409 :
+     fallback);
+  return res.status(status).json({ error: msg });
+}
+
+/* ----------------------------- Controllers ----------------------------- */
 
 // GET /api/users
 export async function listUsersController(req, res) {
   try {
-    const page = toInt(req.query.page) || 1;
-    const limit = toInt(req.query.limit) || 20;
-    const q = (req.query.q || "").toString();
-    const roleId = toInt(req.query.roleId) || undefined;
-    const departmentId = toInt(req.query.departmentId) || undefined;
-    const includeDeleted = String(req.query.includeDeleted || "") === "1";
-    const sortBy = (req.query.sortBy || "id").toString();
-    const sort = (req.query.sort || "desc").toString();
-
-    const { data, total } = await listUsersService({
+    const { page, limit, q, includeDeleted, roleId, departmentId, sortBy, sort } = req.query;
+    const result = await listUsersService({
       prisma,
-      q,
-      page,
-      pageSize: limit,
-      sortBy,
-      sort,
-      roleId,
-      departmentId,
-      includeDeleted,
+      page: Number(page) || 1,
+      limit: Number(limit) || 20,
+      q: q ?? "",
+      includeDeleted: bool(includeDeleted, false),
+      roleId: roleId ?? "",
+      departmentId: departmentId ?? "",
+      sortBy: sortBy ?? "id",
+      sort: sort ?? "asc",
     });
-
-    res.json({
-      ok: true,
-      data,
-      meta: { page, pages: Math.max(1, Math.ceil(total / limit)), total },
-    });
+    return res.json(result);
   } catch (e) {
-    res.status(400).json({ ok: false, error: String(e?.message || e) });
+    return sendError(res, e);
   }
 }
 
 // GET /api/users/:id
 export async function getUserController(req, res) {
   try {
-    const id = toInt(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, error: "INVALID_ID" });
-    const u = await getUserService({ prisma, id });
-    if (!u) return res.status(404).json({ ok: false, error: "USER_NOT_FOUND" });
-    res.json({ ok: true, data: u });
+    const { id } = req.params;
+    const data = await getUserService({ prisma, id });
+    return res.json({ data });
   } catch (e) {
-    res.status(400).json({ ok: false, error: String(e?.message || e) });
+    return sendError(res, e);
   }
 }
 
 // POST /api/users
 export async function createUserController(req, res) {
   try {
-    const created = await createUserService({ prisma, data: req.body || {} });
-    res.status(201).json({ ok: true, data: created });
+    const data = req.body || {};
+    const created = await createUserService({ prisma, data });
+    return res.json({ data: created });
   } catch (e) {
-    const msg = String(e?.message || e);
-    if (/EMPLOYEE_CODE_EXISTS/.test(msg)) {
-      return res.status(409).json({ ok: false, error: "EMPLOYEE_CODE_EXISTS" });
-    }
-    if (/unique/i.test(msg) || /P2002/.test(msg)) {
-      return res.status(409).json({ ok: false, error: "EMAIL_EXISTS" });
-    }
-    res.status(400).json({ ok: false, error: msg });
+    return sendError(res, e);
   }
 }
 
 // PATCH /api/users/:id
 export async function updateUserController(req, res) {
   try {
-    const id = toInt(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, error: "INVALID_ID" });
-    const updated = await updateUserService({ prisma, id, data: req.body || {} });
-    res.json({ ok: true, data: updated });
+    const { id } = req.params;
+    const data = req.body || {};
+    const updated = await updateUserService({ prisma, id, data });
+    return res.json({ data: updated });
   } catch (e) {
-    const msg = String(e?.message || e);
-    if (/EMPLOYEE_CODE_EXISTS/.test(msg)) {
-      return res.status(409).json({ ok: false, error: "EMPLOYEE_CODE_EXISTS" });
-    }
-    if (/P2025/.test(msg)) return res.status(404).json({ ok: false, error: "USER_NOT_FOUND" });
-    if (/unique/i.test(msg) || /P2002/.test(msg)) {
-      return res.status(409).json({ ok: false, error: "EMAIL_EXISTS" });
-    }
-    res.status(400).json({ ok: false, error: msg });
+    return sendError(res, e);
   }
 }
 
-// DELETE /api/users/:id?hard=1
+// DELETE /api/users/:id   (soft by default; use ?hard=1 for hard delete)
 export async function softDeleteUserController(req, res) {
   try {
-    const id = toInt(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, error: "INVALID_ID" });
-
-    const hard = String(req.query.hard || "") === "1";
-    if (hard) {
-      await prisma.userDepartment.deleteMany({ where: { userId: id } });
-      await prisma.user.delete({ where: { id } });
-    } else {
-      await softDeleteUserService({ prisma, id });
-    }
-    res.json({ ok: true });
+    const { id } = req.params;
+    const hard = bool(req.query?.hard, false);
+    const deleted = await softDeleteUserService({ prisma, id, hard });
+    return res.json({ data: deleted });
   } catch (e) {
-    const msg = String(e?.message || e);
-    if (/P2025/.test(msg)) return res.status(404).json({ ok: false, error: "USER_NOT_FOUND" });
-    res.status(400).json({ ok: false, error: msg });
+    return sendError(res, e);
   }
 }
 
-// POST /api/users/:id/primary/:udId
-export async function setPrimaryDepartmentController(req, res) {
-  try {
-    const id = toInt(req.params.id);
-    const udId = toInt(req.params.udId);
-    if (!id || !udId) return res.status(400).json({ ok: false, error: "INVALID_ID" });
-
-    const u = await setPrimaryDepartmentService({ prisma, id, udId });
-    res.json({ ok: true, data: u });
-  } catch (e) {
-    const msg = String(e?.message || e);
-    if (/invalid udId/i.test(msg) || /P2025/.test(msg)) {
-      return res.status(404).json({ ok: false, error: "USER_OR_ASSIGNMENT_NOT_FOUND" });
-    }
-    res.status(400).json({ ok: false, error: msg });
-  }
-}
-
-// ✅ POST /api/users/:id/restore
+// POST /api/users/:id/restore
 export async function restoreUserController(req, res) {
   try {
-    const id = toInt(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, error: "INVALID_ID" });
-    await restoreUserService({ prisma, id });
-    res.json({ ok: true });
+    const { id } = req.params;
+    const data = await restoreUserService({ prisma, id });
+    return res.json({ data });
   } catch (e) {
-    res.status(400).json({ ok: false, error: String(e?.message || e) });
+    return sendError(res, e);
+  }
+}
+
+// POST /api/users/:id/primary-department
+// body: { departmentId: number }
+export async function setPrimaryDepartmentController(req, res) {
+  try {
+    const { id } = req.params;
+    const { departmentId } = req.body || {};
+    if (!departmentId) {
+      return res.status(400).json({ error: "departmentId required" });
+    }
+    const data = await setPrimaryDepartmentService({
+      prisma,
+      userId: Number(id),
+      departmentId: Number(departmentId),
+    });
+    return res.json({ data });
+  } catch (e) {
+    return sendError(res, e);
   }
 }
