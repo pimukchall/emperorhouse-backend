@@ -7,7 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/* ---------- Enums ---------- */
+/**
+ * ---------- Enums ----------
+ */
 enum Gender {
   MALE
   FEMALE
@@ -16,94 +18,115 @@ enum Gender {
 }
 
 enum EmployeeType {
-  DAILY      // รายวัน
-  MONTHLY    // รายเดือน
+  DAILY
+  MONTHLY
 }
 
 enum ContractType {
-  PERMANENT  // ประจำ
-  TEMPORARY  // สัญญาจ้าง
-  PROBATION  // ระยะทดลองงาน
+  PERMANENT
+  TEMPORARY
+  PROBATION
 }
 
+/**
+ * ใช้เฉพาะ 5 ระดับนี้
+ */
 enum PositionLevel {
   STAF
   SVR
   ASST
-  MGR
+  MANAGER
   MD
-  CEO
-  ADMIN
-  DEV
 }
 
-/* ---------- Masters ---------- */
+enum PositionChangeKind {
+  PROMOTE
+  DEMOTE
+  TRANSFER
+}
+
+/**
+ * ---------- Masters ----------
+ */
 model Role {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique              // e.g. "admin", "staff", "dev"
-  labelTh   String
-  labelEn   String
-  users     User[]
+  id      Int    @id @default(autoincrement())
+  name    String @unique // 'admin' | 'user'
+  labelTh String
+  labelEn String
+  users   User[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Department {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique              // e.g. "30000" (HR)
-  nameTh    String
-  nameEn    String
+  id     Int    @id @default(autoincrement())
+  code   String @unique // e.g. 'QMS', 'HR', 'MK'
+  nameTh String
+  nameEn String
 
-  users     User[]
+  userDepartments UserDepartment[]
+
+  // reverse relations for logs
+  fromPositionChangeLogs PositionChangeLog[] @relation("pcl_fromDept")
+  toPositionChangeLogs   PositionChangeLog[] @relation("pcl_toDept")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Organization {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique              // orgCode: "MK","CS","AD",...
-  nameTh    String
-  nameEn    String
+  id     Int    @id @default(autoincrement())
+  code   String @unique
+  nameTh String
+  nameEn String
 
-  users     User[]
+  users User[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-/* ---------- User / Employee Master ---------- */
+/**
+ * ---------- User / Employee Master ----------
+ */
 model User {
-  id             Int            @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
   // Login identity
-  name           String         @default("")
-  email          String
-  passwordHash   String
+  name         String @default("")
+  email        String
+  passwordHash String
 
   // Names
-  firstNameTh    String
-  lastNameTh     String
-  firstNameEn    String
-  lastNameEn     String
+  firstNameTh String
+  lastNameTh  String
+  firstNameEn String
+  lastNameEn  String
 
-  // Role/Department
-  roleId         Int
-  departmentId   Int
-  role           Role           @relation(fields: [roleId], references: [id])
-  department     Department     @relation(fields: [departmentId], references: [id])
+  // Role (one user -> one role)
+  roleId Int
+  role   Role @relation(fields: [roleId], references: [id], map: "FK_User_roleId")
 
-  // Organization / Work location
-  orgId          Int?
-  organization   Organization?  @relation(fields: [orgId], references: [id])
+  // Organization / Work location (optional)
+  orgId        Int?
+  organization Organization? @relation(fields: [orgId], references: [id], map: "FK_User_orgId")
+
+  // Many departments (position per department)
+  userDepartments UserDepartment[]
+
+  // Primary department (1-1)
+  primaryUserDeptId Int?            @unique
+  primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id], map: "FK_User_primaryUserDeptId")
+
+  // Position change logs (as subject & actor) — ฝั่งตรงข้ามของ PositionChangeLog
+  positionChangeLogs      PositionChangeLog[] @relation("pcl_user")
+  actedPositionChangeLogs PositionChangeLog[] @relation("pcl_actor")
 
   // Employee master fields
-  employeeCode     String?         @unique             // เช่น "68-0001"
-  positionName     String?
-  positionLevel    PositionLevel?
-  employeeType     EmployeeType?
-  contractType     ContractType?
+  employeeCode String?       @unique
+  employeeType EmployeeType?
+  contractType ContractType?
 
   startDate        DateTime?
   probationEndDate DateTime?
@@ -111,47 +134,115 @@ model User {
   birthDate        DateTime?
   gender           Gender?
 
-  signature        Bytes?                            // ถ้าจะเปลี่ยนเป็น path ให้ใช้ String?
-  avatarPath       String?
+  signature  Bytes?
+  avatarPath String?
 
   // Relations
-  passwordResets   PasswordReset[]
+  passwordResets PasswordReset[]
 
   // Soft delete & timestamps
-  deletedAt      DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  // อนุญาตให้ reuse email ได้เมื่อ soft-delete
   @@unique([email, deletedAt])
-
-  // ค้นหาเร็ว
-  @@index([roleId, departmentId])
+  @@index([roleId])
   @@index([orgId])
   @@index([employeeType])
   @@index([contractType])
-  @@index([positionLevel])
   @@index([startDate])
   @@index([resignedAt])
   @@index([deletedAt])
 }
 
-/* ---------- Password Reset ---------- */
-model PasswordReset {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  token     String   @unique
-  expiresAt DateTime
-  usedAt    DateTime?
+/**
+ * ---------- User ↔ Department (historized) ----------
+ */
+model UserDepartment {
+  id Int @id @default(autoincrement())
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], map: "FK_UserDepartment_userId")
+
+  departmentId Int
+  department   Department @relation(fields: [departmentId], references: [id], map: "FK_UserDepartment_departmentId")
+
+  positionLevel PositionLevel
+  positionName  String? // ชื่อตำแหน่งจริง เช่น 'QMR', 'Project Manager'
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime? // null = active
+
+  // backlink for primary
+  primaryOfUser User? @relation("primary_of_user")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // allow history (one active record per user+department)
+  @@unique([userId, departmentId, endedAt])
+  @@index([userId, departmentId])
+  @@index([departmentId, positionLevel])
+  @@index([startedAt])
+  @@index([endedAt])
+}
+
+/**
+ * ---------- Position change audit log ----------
+ */
+model PositionChangeLog {
+  id   Int                @id @default(autoincrement())
+  kind PositionChangeKind
+
+  userId Int
+  user   User @relation("pcl_user", fields: [userId], references: [id], map: "FK_PCL_userId")
+
+  fromDepartmentId Int?
+  fromDepartment   Department? @relation("pcl_fromDept", fields: [fromDepartmentId], references: [id], map: "FK_PCL_fromDepartmentId")
+
+  toDepartmentId Int?
+  toDepartment   Department? @relation("pcl_toDept", fields: [toDepartmentId], references: [id], map: "FK_PCL_toDepartmentId")
+
+  actorId Int?
+  actor   User? @relation("pcl_actor", fields: [actorId], references: [id], map: "FK_PCL_actorId")
+
+  fromLevel PositionLevel?
+  toLevel   PositionLevel?
+
+  fromName String?
+  toName   String?
+
+  effectiveDate DateTime
+  reason        String?
+
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, effectiveDate])
+  @@index([kind])
+  @@index([fromDepartmentId])
+  @@index([toDepartmentId])
+}
+
+/**
+ * ---------- Password Reset ----------
+ */
+model PasswordReset {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "FK_PasswordReset_userId")
 
   @@index([userId])
   @@index([token])
 }
 
-/* ---------- Contact / Public Form ---------- */
+/**
+ * ---------- Contact / Public Form ----------
+ */
 model ContactMessage {
   id        Int      @id @default(autoincrement())
   name      String   @db.VarChar(120)

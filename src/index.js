@@ -11,6 +11,7 @@ import { router as profileRouter } from './routes/profile.js';
 import { router as rolesRouter } from './routes/roles.js';
 import { router as departmentsRouter } from './routes/departments.js';
 import { router as contactRouter } from './routes/contact.js'
+import userDepartmentsRouter from "./routes/user-departments.js";
 
 dotenv.config();
 
@@ -42,6 +43,7 @@ app.use('/profile', profileRouter);
 app.use('/api/roles', rolesRouter);
 app.use('/api/departments', departmentsRouter);
 app.use("/api/contacts", contactRouter);
+app.use('/api/users/:id/departments', userDepartmentsRouter);
 
 app.use((_req, res) => res.status(404).send('Not Found'));
 

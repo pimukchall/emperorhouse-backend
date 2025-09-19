@@ -27,7 +27,10 @@ router.post("/login", async (req, res) => {
 
   const user = await prisma.user.findFirst({
     where: { email, deletedAt: null },
-    include: { role: true, department: true },
+    include: {
+      role: true,
+      primaryUserDept: { include: { department: true } },
+    },
   });
   if (!user)
     return res.status(401).json({ ok: false, error: "Invalid credentials" });
@@ -39,24 +42,22 @@ router.post("/login", async (req, res) => {
   // อายุ session
   req.sessionOptions.maxAge = (remember ? 7 : 1) * 24 * 60 * 60 * 1000;
 
-  // เก็บ snapshot ที่จำเป็นลง session (roleName ให้เป็น lower-case เสมอ)
+  // เก็บ snapshot ลง session
   req.session.user = {
     id: user.id,
     name: user.name || "",
     email: user.email,
     roleId: user.roleId ?? null,
-    roleName: (user.role?.name || "").toLowerCase(), // 👈 สำคัญ
-    departmentId: user.departmentId ?? null,
-    deptCode: user.department?.code || null,
+    roleName: (user.role?.name || "").toLowerCase(),
+    primaryUserDeptId: user.primaryUserDeptId ?? null,
+    deptCode: user.primaryUserDept?.department?.code ?? null,
   };
 
-  // (ออปชัน) track last login
   await prisma.user.update({
     where: { id: user.id },
     data: { updatedAt: new Date() },
   });
 
-  // ส่งข้อมูลเต็มให้ FE ใช้ได้ทันที
   return res.json({
     ok: true,
     data: {
@@ -64,25 +65,24 @@ router.post("/login", async (req, res) => {
       name: user.name || "",
       email: user.email,
       role: user.role ? { id: user.role.id, name: user.role.name } : null,
-      department: user.department
+      primaryUserDept: user.primaryUserDept
         ? {
-            id: user.department.id,
-            code: user.department.code,
-            nameTh: user.department.nameTh,
-            nameEn: user.department.nameEn,
+            id: user.primaryUserDept.id,
+            positionLevel: user.primaryUserDept.positionLevel,
+            positionName: user.primaryUserDept.positionName,
+            department: {
+              id: user.primaryUserDept.department.id,
+              code: user.primaryUserDept.department.code,
+              nameTh: user.primaryUserDept.department.nameTh,
+              nameEn: user.primaryUserDept.department.nameEn,
+            },
           }
         : null,
     },
   });
 });
 
-/** POST /auth/logout */
-router.post("/logout", (req, res) => {
-  req.session = null;
-  res.json({ ok: true });
-});
-
-/** GET /auth/me — คืน user จาก DB (รวม role+department) เพื่อ FE เช็คสิทธิ์ได้แน่ */
+/** GET /auth/me */
 router.get("/me", async (req, res) => {
   const sess = req.session?.user;
   if (!sess?.id) {
@@ -98,8 +98,15 @@ router.get("/me", async (req, res) => {
       name: true,
       avatarPath: true,
       role: { select: { id: true, name: true, labelTh: true, labelEn: true } },
-      department: {
-        select: { id: true, code: true, nameTh: true, nameEn: true },
+      primaryUserDept: {
+        select: {
+          id: true,
+          positionLevel: true,
+          positionName: true,
+          department: {
+            select: { id: true, code: true, nameTh: true, nameEn: true },
+          },
+        },
       },
     },
   });
@@ -112,205 +119,74 @@ router.get("/me", async (req, res) => {
 
 /** POST /auth/change-password */
 router.post("/change-password", requireAuth, async (req, res) => {
-  const t = (s = "") => String(s ?? "").trim(); // normalize
+  const t = (s = "") => String(s ?? "").trim();
   const currentPassword = t(req.body?.currentPassword);
   const newPassword = t(req.body?.newPassword);
 
-  // ---------- Validation ----------
-  const errors = {};
-  if (!currentPassword) errors.currentPassword = "กรุณากรอกรหัสผ่านปัจจุบัน";
-  if (!newPassword) errors.newPassword = "กรุณากรอกรหัสผ่านใหม่";
-  if (newPassword && newPassword.length < 8) {
-    errors.newPassword = "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร";
+  if (!currentPassword || !newPassword) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "currentPassword & newPassword required" });
   }
-  if (currentPassword && newPassword && currentPassword === newPassword) {
-    errors.newPassword = "รหัสผ่านใหม่ต้องไม่เหมือนรหัสผ่านปัจจุบัน";
-  }
-  if (Object.keys(errors).length) {
-    return res.status(400).json({
-      ok: false,
-      code: "VALIDATION_ERROR",
-      message: "กรุณาตรวจสอบข้อมูลที่กรอก",
-      message_en: "Please check the fields you entered.",
-      errors,
-      fields: Object.keys(errors),
-    });
+  if (newPassword.length < 8) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "password must be at least 8 characters" });
   }
 
-  try {
-    // ---------- Load user ----------
-    const me = await prisma.user.findFirst({
-      where: { id: req.session.user.id, deletedAt: null },
-      select: { id: true, passwordHash: true, email: true, name: true },
-    });
-    if (!me) {
-      return res.status(404).json({
-        ok: false,
-        code: "NOT_FOUND",
-        message: "ไม่พบผู้ใช้",
-        message_en: "User not found.",
+  const me = req.session.user;
+  const u = await prisma.user.findUnique({ where: { id: me.id } });
+  if (!u) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+  const ok = await bcrypt.compare(currentPassword, u.passwordHash || "");
+  if (!ok)
+    return res
+      .status(400)
+      .json({ ok: false, error: "Current password is incorrect" });
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({ where: { id: me.id }, data: { passwordHash } });
+
+  // แจ้งทางอีเมล (best-effort)
+  if (u.email) {
+    try {
+      const msg = renderPasswordChangedEmail({ name: u.name || "" });
+      await sendMail({
+        to: u.email,
+        subject: msg.subject,
+        html: msg.html,
+        text: msg.text,
       });
+    } catch (err) {
+      console.error("send password-changed email failed:", err);
     }
-
-    // ---------- Verify current password ----------
-    const passOk = await bcrypt.compare(currentPassword, me.passwordHash || "");
-    if (!passOk) {
-      // ให้เป็น validation error ที่ผูกกับฟิลด์ จะได้โชว์ใต้ช่องได้
-      return res.status(400).json({
-        ok: false,
-        code: "VALIDATION_ERROR",
-        message: "รหัสผ่านปัจจุบันไม่ถูกต้อง",
-        message_en: "Current password is incorrect.",
-        errors: { currentPassword: "รหัสผ่านปัจจุบันไม่ถูกต้อง" },
-        fields: ["currentPassword"],
-      });
-    }
-
-    // ---------- Update ----------
-    const passwordHash = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { id: me.id }, data: { passwordHash } });
-
-    // (ออปชัน) คุณอาจ revoke session อื่น ๆ ที่นี่เพื่อความปลอดภัย
-    // await revokeOtherSessions(me.id, req.session.id)
-
-    // ---------- Notify by email (best-effort) ----------
-    if (me.email) {
-      try {
-        const msg = renderPasswordChangedEmail({ name: me.name });
-        await sendMail({
-          to: me.email,
-          subject: msg.subject,
-          html: msg.html,
-          text: msg.text,
-        });
-      } catch (err) {
-        console.error("send password-changed email failed:", err);
-        // ไม่ fail request ถ้าเมลส่งไม่สำเร็จ
-      }
-    }
-
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error("change-password error:", err);
-    return res.status(500).json({
-      ok: false,
-      code: "INTERNAL_ERROR",
-      message: "เกิดข้อผิดพลาดภายในระบบ",
-      message_en: "Something went wrong on the server.",
-    });
   }
-});
-
-/** POST /auth/register */
-router.post("/register", async (req, res) => {
-  try {
-    const {
-      name,
-      email,
-      password,
-      firstNameTh,
-      lastNameTh,
-      firstNameEn,
-      lastNameEn,
-      departmentId,
-    } = req.body || {};
-
-    if (!email || !password || !departmentId) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "email, password, departmentId required" });
-    }
-    if (password.length < 8) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "password must be at least 8 characters" });
-    }
-
-    const exists = await prisma.user.findUnique({ where: { email } });
-    if (exists && !exists.deletedAt) {
-      return res.status(409).json({ ok: false, error: "Email already in use" });
-    }
-
-    const staffRole = await prisma.role.findUnique({
-      where: { name: "staff" },
-    });
-    if (!staffRole) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: 'Default role "staff" not found. Please seed roles.',
-        });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const displayName =
-      (name ?? "").trim() ||
-      [firstNameTh, lastNameTh].filter(Boolean).join(" ").trim() ||
-      [firstNameEn, lastNameEn].filter(Boolean).join(" ").trim() ||
-      "";
-
-    const created = await prisma.user.create({
-      data: {
-        name: displayName,
-        email,
-        passwordHash,
-        firstNameTh: firstNameTh || "",
-        lastNameTh: lastNameTh || "",
-        firstNameEn: firstNameEn || "",
-        lastNameEn: lastNameEn || "",
-        roleId: staffRole.id,
-        departmentId: Number(departmentId),
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        firstNameTh: true,
-        lastNameTh: true,
-        firstNameEn: true,
-        lastNameEn: true,
-        role: { select: { id: true, name: true } },
-        department: {
-          select: { id: true, code: true, nameTh: true, nameEn: true },
-        },
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    return res.status(201).json({ ok: true, data: created });
-  } catch (e) {
-    return res.status(400).json({ ok: false, error: e.message });
-  }
+  res.json({ ok: true });
 });
 
 /** POST /auth/forgot-password */
 router.post("/forgot-password", async (req, res) => {
-  const { email } = req.body || {};
+  const email = String(req.body?.email || "").trim();
   if (!email)
     return res.status(400).json({ ok: false, error: "email required" });
 
-  const user = await prisma.user.findFirst({
+  const u = await prisma.user.findFirst({
     where: { email, deletedAt: null },
-    select: { id: true, name: true, email: true },
+    select: { id: true, email: true, name: true },
   });
+  if (!u) return res.json({ ok: true }); // เงียบๆ เพื่อความปลอดภัย
 
-  // เพื่อลดข้อมูลรั่ว ตอบ 200 เสมอ
-  if (!user) return res.json({ ok: true });
-
-  const token = genToken(32);
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-
+  const token = genToken(24);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30m
   await prisma.passwordReset.create({
-    data: { userId: user.id, token, expiresAt },
+    data: { userId: u.id, token, expiresAt },
   });
 
   try {
-    const resetUrl = makeResetLink(token);
-    const msg = renderForgotPasswordEmail({ name: user.name, resetUrl });
+    const link = makeResetLink(token);
+    const msg = renderForgotPasswordEmail({ name: u.name || "", link });
     await sendMail({
-      to: user.email,
+      to: u.email,
       subject: msg.subject,
       html: msg.html,
       text: msg.text,
@@ -318,22 +194,22 @@ router.post("/forgot-password", async (req, res) => {
   } catch (err) {
     console.error("send forgot-password email failed:", err);
   }
-  return res.json({ ok: true });
+
+  res.json({ ok: true });
 });
 
 /** POST /auth/reset-password */
 router.post("/reset-password", async (req, res) => {
-  const { token, password } = req.body || {};
-  if (!token || !password) {
+  const token = String(req.body?.token || "").trim();
+  const newPassword = String(req.body?.newPassword || "").trim();
+  if (!token || !newPassword)
     return res
       .status(400)
-      .json({ ok: false, error: "token & password required" });
-  }
-  if (password.length < 8) {
+      .json({ ok: false, error: "token & newPassword required" });
+  if (newPassword.length < 8)
     return res
       .status(400)
       .json({ ok: false, error: "password must be at least 8 characters" });
-  }
 
   const pr = await prisma.passwordReset.findFirst({
     where: { token, usedAt: null, expiresAt: { gt: new Date() } },
@@ -344,32 +220,30 @@ router.post("/reset-password", async (req, res) => {
       .status(400)
       .json({ ok: false, error: "Invalid or expired token" });
 
-  const u = await prisma.user.findUnique({
-    where: { id: pr.userId },
-    select: { id: true, email: true, name: true },
-  });
+  const u = await prisma.user.findUnique({ where: { id: pr.userId } });
+  if (!u) return res.status(400).json({ ok: false, error: "Invalid user" });
 
-  const passwordHash = await bcrypt.hash(password, 10);
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: pr.userId }, data: { passwordHash } }),
-    prisma.passwordReset.update({
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: u.id }, data: { passwordHash } });
+    await tx.passwordReset.update({
       where: { id: pr.id },
       data: { usedAt: new Date() },
-    }),
-  ]);
+    });
+  });
 
-  if (u?.email) {
-    try {
-      const msg = renderPasswordChangedEmail({ name: u.name });
+  try {
+    if (u.email) {
+      const msg = renderPasswordChangedEmail({ name: u.name || "" });
       await sendMail({
         to: u.email,
         subject: msg.subject,
         html: msg.html,
         text: msg.text,
       });
-    } catch (err) {
-      console.error("send password-changed email failed:", err);
     }
+  } catch (err) {
+    console.error("send password-changed email failed:", err);
   }
   res.json({ ok: true });
 });
