@@ -4,7 +4,16 @@ import { selfUpdateProfileController } from "../controllers/profile.controller.j
 
 const router = Router();
 
-// ใช้ PATCH /api/profile (ไม่ต้องมี :id)
+router.get("/", requireAuth, async (req, res) => {
+  const me =
+    req.me || req.user || req.auth?.user || req.session?.user || null;
+
+  if (!me) {
+    return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+  }
+  res.json({ ok: true, data: me });
+});
+
 router.patch("/", requireAuth, selfUpdateProfileController);
 
 export default router;

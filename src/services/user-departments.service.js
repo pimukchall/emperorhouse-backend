@@ -1,98 +1,299 @@
-import { canSetLevel, ensureQmrInQms, noAnotherMDinDepartment } from "../utils/roles.js";
+// src/services/user-departments.service.js
+import { prisma as defaultPrisma } from "../prisma.js";
 
-export async function listAssignmentsService({ prisma, userId }) {
-  const items = await prisma.userDepartment.findMany({
-    where: { userId },
-    orderBy: [{ endedAt: "asc" }, { startedAt: "desc" }],
-    include: { department: true },
-  });
-  const u = await prisma.user.findUnique({ where: { id: userId }, select: { primaryUserDeptId: true } });
-  return items.map(x => ({ ...x, isPrimary: x.id === u?.primaryUserDeptId }));
+const LEVELS = ["STAF", "SVR", "ASST", "MANAGER", "MD"];
+
+/** ปรับเป็น UPPERCASE และตรวจว่าเป็นค่า enum ที่สคีมารองรับ */
+function normalizeLevel(v) {
+  const up = String(v || "").toUpperCase();
+  if (!LEVELS.includes(up)) {
+    const err = new Error("ตำแหน่งไม่ถูกต้อง");
+    err.status = 400;
+    throw err;
+  }
+  return up;
 }
 
-export async function addOrUpdateAssignmentService({ prisma, actor, userId, departmentId, positionLevel, positionName, startedAt, setPrimary }) {
-  const dept = await prisma.department.findUnique({ where: { id: Number(departmentId) } });
-  if (!dept) throw new Error("INVALID_DEPT");
-
-  if ((positionName || "").trim().toUpperCase() === "QMR" && !ensureQmrInQms(dept)) throw new Error("QMR_QMS");
-  if (String(positionLevel).toUpperCase() === "MD") {
-    const ok = await noAnotherMDinDepartment(prisma, departmentId);
-    if (!ok) throw new Error("MD_EXISTS");
+/**
+ * ตรวจว่ามี MD ที่ยัง active อยู่ในแผนกเดียวกัน (ยกเว้นคนเดิม) หรือไม่
+ * ใช้ก่อนเปลี่ยนระดับ/สร้าง assignment ใหม่ให้เป็น MD
+ */
+async function assertNoOtherActiveMD({ prisma, departmentId, exceptUserId = null }) {
+  const existed = await prisma.userDepartment.findFirst({
+    where: {
+      departmentId: Number(departmentId),
+      endedAt: null, isActive: true,
+      isActive: true,
+      positionLevel: "MD",
+      ...(exceptUserId ? { userId: { not: Number(exceptUserId) } } : {}),
+    },
+    select: { id: true, userId: true },
+  });
+  if (existed) {
+    const err = new Error("ในแผนกนี้มี MD ที่ยัง active อยู่แล้ว");
+    err.status = 409;
+    throw err;
   }
+}
 
+/**
+ * ดึง assignment + owner + department (สำหรับตรวจสอบ/เขียน log)
+ */
+async function getUdWithJoins(prisma, udId) {
+  const rec = await prisma.userDepartment.findUnique({
+    where: { id: Number(udId) },
+    include: {
+      user: { select: { id: true, name: true, firstNameTh: true, lastNameTh: true } },
+      department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
+    },
+  });
+  if (!rec) {
+    const err = new Error("ไม่พบข้อมูล assignment ที่ระบุ");
+    err.status = 404;
+    throw err;
+  }
+  return rec;
+}
+
+/**
+ * สร้าง/อัปเดต assignment สำหรับ user + department
+ * - ถ้ามี active เดิมอยู่ → update (level/name/startedAt)
+ * - ถ้าไม่มี → create ใหม่ (กันข้อมูลเพี้ยนด้วยการปิด active ที่อาจหลุด)
+ * - ถ้า level เป็น MD → กัน MD ซ้ำในแผนก
+ * - ถ้ายังไม่เคยตั้ง primary ให้ user → ตั้ง primary เป็น assignment ที่ได้
+ */
+export async function addOrUpdateAssignmentService({
+  prisma = defaultPrisma,
+  userId,
+  departmentId,
+  positionLevel,
+  positionName,
+  startedAt,
+}) {
+  const uid = Number(userId);
+  const did = Number(departmentId);
   const now = new Date();
+
+  const level = normalizeLevel(positionLevel);
+
   return prisma.$transaction(async (tx) => {
-    const dup = await tx.userDepartment.findFirst({ where: { userId, departmentId: Number(departmentId), endedAt: null } });
-    let rec;
-    if (dup) {
-      rec = await tx.userDepartment.update({
-        where: { id: dup.id },
-        data: { positionLevel: String(positionLevel).toUpperCase(), positionName: positionName || null },
+    // ถ้าตั้งเป็น MD → กัน MD ซ้ำ
+    if (level === "MD") {
+      await assertNoOtherActiveMD({ prisma: tx, departmentId: did, exceptUserId: uid });
+    }
+
+    // หา active assignment เดิม
+    let ud = await tx.userDepartment.findFirst({
+      where: { userId: uid, departmentId: did, endedAt: null, isActive: true, isActive: true },
+      include: { department: true },
+    });
+
+    if (ud) {
+      // update กรณีมี active เดิม
+      ud = await tx.userDepartment.update({
+        where: { id: ud.id },
+        data: {
+          positionLevel: level,
+          positionName: positionName ?? ud.positionName,
+          ...(startedAt !== undefined ? { startedAt: startedAt ? new Date(startedAt) : now } : {}),
+          isActive: true,
+          endedAt: null, isActive: true,
+        },
         include: { department: true },
       });
     } else {
-      rec = await tx.userDepartment.create({
+      // กันข้อมูลเพี้ยน: เผื่อมี active record ซ้อนหลุดมา
+      await tx.userDepartment.updateMany({
+        where: { userId: uid, departmentId: did, endedAt: null, isActive: true, isActive: true },
+        data: { isActive: false, endedAt: now },
+      });
+
+      ud = await tx.userDepartment.create({
         data: {
-          userId, departmentId: Number(departmentId),
-          positionLevel: String(positionLevel).toUpperCase(),
+          userId: uid,
+          departmentId: did,
+          positionLevel: level,
           positionName: positionName || null,
           startedAt: startedAt ? new Date(startedAt) : now,
+          endedAt: null, isActive: true,
+          isActive: true,
         },
         include: { department: true },
       });
     }
-    if (setPrimary) await tx.user.update({ where: { id: userId }, data: { primaryUserDeptId: rec.id } });
-    return rec;
+
+    // ถ้า user ยังไม่มี primary → ตั้งให้เลย
+    const owner = await tx.user.findUnique({
+      where: { id: uid },
+      select: { id: true, primaryUserDeptId: true },
+    });
+    if (owner && !owner.primaryUserDeptId) {
+      await tx.user.update({
+        where: { id: uid },
+        data: { primaryUserDeptId: ud.id },
+      });
+    }
+
+    return ud;
   });
 }
 
-export async function endOrRenameAssignmentService({ prisma, udId, positionName, endedAt }) {
-  const data = {};
-  if (positionName !== undefined) data.positionName = positionName || null;
-  if (endedAt !== undefined) data.endedAt = endedAt ? new Date(endedAt) : null;
+/**
+ * เปลี่ยน "ระดับ" (PositionLevel) ของ assignment ที่ระบุ
+ * - กัน MD ซ้ำในแผนก
+ * - เขียน PositionChangeLog (from/to)
+ */
+export async function changeLevelService({
+  prisma = defaultPrisma,
+  udId,
+  newLevel,
+  actorId = null,
+  effectiveDate = new Date(),
+  reason = null,
+  newPositionName, // (optional) ถ้าต้องการแก้ชื่อไปพร้อมกัน
+}) {
+  const tx = prisma;
+  const ud = await getUdWithJoins(tx, udId);
+  const toLevel = normalizeLevel(newLevel);
 
-  const updated = await prisma.userDepartment.update({ where: { id: udId }, data, include: { department: true } });
-  if (updated.endedAt) {
-    const owner = await prisma.user.findFirst({ where: { primaryUserDeptId: udId }, select: { id: true } });
-    if (owner) await prisma.user.update({ where: { id: owner.id }, data: { primaryUserDeptId: null } });
+  // ถ้าจะเปลี่ยนเป็น MD → กัน MD ซ้ำในแผนก
+  if (toLevel === "MD") {
+    await assertNoOtherActiveMD({
+      prisma: tx,
+      departmentId: ud.departmentId,
+      exceptUserId: ud.userId,
+    });
   }
-  return updated;
-}
 
-export async function changeLevelService({ prisma, actor, userId, udId, toLevel, positionName, reason, kind }) {
-  if (!toLevel) throw new Error("MISSING_TOLEVEL");
-  const ud = await prisma.userDepartment.findUnique({ where: { id: udId }, include: { department: true } });
-  if (!ud || ud.userId !== userId) throw new Error("NOT_FOUND");
-  if (ud.endedAt) throw new Error("ENDED");
-
-  if (!canSetLevel(actor, toLevel)) throw new Error("FORBIDDEN");
-  if ((positionName || "").trim().toUpperCase() === "QMR" && !ensureQmrInQms(ud.department)) throw new Error("QMR_QMS");
-  if (String(toLevel).toUpperCase() === "MD") {
-    const ok = await noAnotherMDinDepartment(prisma, ud.departmentId, ud.id);
-    if (!ok) throw new Error("MD_EXISTS");
-  }
-
-  return prisma.$transaction(async (tx) => {
-    const after = await tx.userDepartment.update({
-      where: { id: udId },
-      data: { positionLevel: String(toLevel).toUpperCase(), positionName: positionName ?? ud.positionName },
+  const updated = await tx.$transaction(async (trx) => {
+    // Update assignment
+    const rec = await trx.userDepartment.update({
+      where: { id: ud.id },
+      data: {
+        positionLevel: toLevel,
+        ...(newPositionName !== undefined ? { positionName: newPositionName || null } : {}),
+      },
+      include: { department: true },
     });
 
-    await tx.positionChangeLog.create({
+    // Write PositionChangeLog
+    await trx.positionChangeLog.create({
       data: {
-        kind, userId,
+        kind: "PROMOTE", // หรือจะ map จาก rank from/to ก็ได้ (ขอใช้ PROMOTE เป็น default)
+        userId: ud.userId,
+        actorId: actorId ? Number(actorId) : null,
         fromDepartmentId: ud.departmentId,
         toDepartmentId: ud.departmentId,
         fromLevel: ud.positionLevel,
-        toLevel: String(toLevel).toUpperCase(),
-        fromName: ud.positionName,
-        toName: positionName ?? ud.positionName,
-        effectiveDate: new Date(),
+        toLevel,
+        fromName: ud.positionName || null,
+        toName: newPositionName !== undefined ? (newPositionName || null) : ud.positionName || null,
+        effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
         reason: reason || null,
-        actorId: actor?.id || null,
       },
     });
 
-    return after;
+    return rec;
   });
+
+  return updated;
+}
+
+/**
+ * แก้ชื่อ positionName / ยุติ (end) assignment
+ * - ถ้า end → เซ็ต endedAt และ isActive=false
+ * - ถ้า assignment ถูก end และเป็น primary ของ user → เคลียร์ primaryUserDeptId
+ */
+export async function endOrRenameAssignmentService({
+  prisma = defaultPrisma,
+  udId,
+  positionName, // optional: ปรับชื่อ
+  endedAt,      // optional: ถ้าตั้ง → end
+}) {
+  const tx = prisma;
+  const now = new Date();
+  const data = {};
+
+  if (positionName !== undefined) data.positionName = positionName || null;
+  if (endedAt !== undefined) {
+    const ended = endedAt ? new Date(endedAt) : now;
+    data.endedAt = ended;
+    data.isActive = false;
+  }
+
+  const updated = await tx.userDepartment.update({
+    where: { id: Number(udId) },
+    data,
+    include: { department: true },
+  });
+
+  // ถ้า end แล้ว และเคยเป็น primary → เคลียร์
+  if (updated.endedAt) {
+    const owner = await tx.user.findFirst({
+      where: { primaryUserDeptId: updated.id },
+      select: { id: true },
+    });
+    if (owner) {
+      await tx.user.update({
+        where: { id: owner.id },
+        data: { primaryUserDeptId: null },
+      });
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * ดึง assignments ของผู้ใช้
+ * - activeOnly=true → endedAt=null & isActive=true
+ */
+export async function listAssignmentsByUser({
+  prisma = defaultPrisma,
+  userId,
+  activeOnly = false,
+}) {
+  const where = { userId: Number(userId) };
+  if (activeOnly) {
+    Object.assign(where, { endedAt: null, isActive: true, isActive: true });
+  }
+
+  return prisma.userDepartment.findMany({
+    where,
+    orderBy: [{ endedAt: "asc" }, { startedAt: "desc" }],
+    include: {
+      department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
+    },
+  });
+}
+
+export async function listAssignmentsService(opts) {
+  return listAssignmentsByUser(opts);
+}
+
+/**
+ * ตั้ง assignment เป็น primary ของผู้ใช้ (utility เผื่อ controller เรียกตรง)
+ * - ต้องเป็น active record เท่านั้น
+ */
+export async function setPrimaryAssignmentService({
+  prisma = defaultPrisma,
+  userId,
+  udId,
+}) {
+  const tx = prisma;
+  const uid = Number(userId);
+  const rec = await tx.userDepartment.findFirst({
+    where: { id: Number(udId), userId: uid, endedAt: null, isActive: true, isActive: true },
+    select: { id: true },
+  });
+  if (!rec) {
+    const err = new Error("ต้องเป็น assignment ที่ active ของผู้ใช้เท่านั้น");
+    err.status = 400;
+    throw err;
+  }
+  await tx.user.update({
+    where: { id: uid },
+    data: { primaryUserDeptId: rec.id },
+  });
+  return { ok: true };
 }

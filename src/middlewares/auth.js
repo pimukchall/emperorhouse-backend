@@ -15,11 +15,13 @@ function tryVerifyAccess(token) {
   }
   return null;
 }
+
 function readBearer(req) {
   const h = req.headers?.authorization || "";
   const m = /^Bearer\s+(.+)$/i.exec(h);
   return m?.[1] || null;
 }
+
 function readAccessCookie(req) {
   return (
     req.cookies?.access_token ||
@@ -32,9 +34,10 @@ function readAccessCookie(req) {
 /* ---------------- identity resolver ---------------- */
 function resolveIdentityFromReq(req) {
   // 1) session
-  if (req.session?.user?.id) {
-    return { uid: Number(req.session.user.id) || null, roleFromToken: null, payload: null };
+  if (req.user?.id || req.userId || req.auth?.sub) {
+    return { uid: Number(req.user?.id || req.userId || req.auth?.sub) || null, roleFromToken: null, payload: null };
   }
+  
   // 2) bearer
   const bearer = readBearer(req);
   if (bearer) {
@@ -43,6 +46,7 @@ function resolveIdentityFromReq(req) {
       return { uid: Number(dec.sub || dec.uid) || null, roleFromToken: dec.role || null, payload: dec };
     }
   }
+
   // 3) cookie
   const token = readAccessCookie(req);
   if (token) {
@@ -89,6 +93,7 @@ export async function requireAuth(req, res, next) {
   req.auth = payload || { sub: u.id, role: roleName };
 
   // sync snapshot ให้โค้ดเดิมที่อ่าน session
+req.session = req.session || {};
   req.session.user = {
     id: u.id,
     email: u.email,
@@ -125,7 +130,7 @@ export function requireRole(...roles) {
 
 export async function requireMe(req, _res, next) {
   const uid =
-    req.session?.user?.id ||
+    req.user?.id || req.userId || req.auth?.sub ||
     req.user?.id ||
     req.userId ||
     req.auth?.sub ||
@@ -140,7 +145,7 @@ export async function requireMe(req, _res, next) {
         name: true,
         role: { select: { name: true } },
         userDepartments: {
-          where: { endedAt: null },
+          where: { endedAt: null, isActive: true, isActive: true },
           select: {
             positionLevel: true,
             positionName: true,
@@ -177,6 +182,7 @@ export async function requireMe(req, _res, next) {
       };
 
       // sync ส่วนสำคัญเข้า session (เผื่อโค้ดเก่า)
+req.session = req.session || {};
       req.session.user = {
         ...(req.session.user || {}),
         roleName: req.me.roleName,

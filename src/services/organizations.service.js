@@ -73,7 +73,7 @@ export async function listOrganizationsService({
 
 export async function getOrganizationService({ id }) {
   const oid = Number(id);
-  if (!Number.isFinite(oid)) throw new Error("INVALID_ID");
+  if (!Number.isFinite(oid)) throw new Error("ไอดีไม่ถูกต้อง");
   return prisma.organization.findUnique({
     where: { id: oid },
     select: { id: true, code: true, nameTh: true, nameEn: true, deletedAt: true },
@@ -82,18 +82,19 @@ export async function getOrganizationService({ id }) {
 
 export async function createOrganizationService({ data }) {
   const { code, nameTh, nameEn } = data || {};
-  if (typeof code !== "undefined" && code !== null && String(code).trim() !== "") {
-    const exists = await prisma.organization.findFirst({ where: { code: typeof code === "string" ? code : Number(code) } });
+  const codeStr = String(code ?? "").trim();
+  if (codeStr !== "") {
+    const exists = await prisma.organization.findFirst({ where: { code: codeStr } });
     if (exists) {
-      const err = new Error("ORG_CODE_EXISTS");
+      const err = new Error("มีรหัสที่ตั้งนี้ในระบบแล้ว");
       err.status = 409;
       throw err;
     }
   }
   return prisma.organization.create({
     data: {
-      // ถ้าไม่ส่ง code มาเลย → ปล่อย undefined จะไม่เขียนค่า null ทับ
-      code: typeof code === "undefined" || String(code).trim() === "" ? undefined : (typeof code === "string" ? code : Number(code)),
+      // ไม่ส่ง/ว่าง → undefined (ไม่เขียนทับ), มีค่า → string ที่ trim แล้ว
+      code: codeStr === "" ? undefined : codeStr,
       nameTh: typeof nameTh === "undefined" || nameTh === "" ? null : nameTh,
       nameEn: typeof nameEn === "undefined" || nameEn === "" ? null : nameEn,
     },
@@ -103,18 +104,18 @@ export async function createOrganizationService({ data }) {
 
 export async function updateOrganizationService({ id, data }) {
   const oid = Number(id);
-  if (!Number.isFinite(oid)) throw new Error("INVALID_ID");
-  const { code, nameTh, nameEn } = data || {};
+  if (!Number.isFinite(oid)) throw new Error("ไอดีไม่ถูกต้อง");
+  const { nameTh, nameEn } = data || {};
+  const codeStr = String(data?.code ?? "").trim();
 
   // กันซ้ำ code กับตัวอื่น เมื่อมีส่ง code มาและไม่ใช่ค่าว่าง
-  if (typeof code !== "undefined" && String(code).trim() !== "") {
-    const codeVal = typeof code === "string" ? code : Number(code);
+   if (typeof data?.code !== "undefined" && codeStr !== "") {
     const exists = await prisma.organization.findFirst({
-      where: { code: codeVal, NOT: { id: oid } },
+      where: { code: codeStr, NOT: { id: oid } },
       select: { id: true },
     });
     if (exists) {
-      const err = new Error("ORG_CODE_EXISTS");
+      const err = new Error("มีรหัสที่ตั้งนี้ในระบบแล้ว");
       err.status = 409;
       throw err;
     }
@@ -123,11 +124,8 @@ export async function updateOrganizationService({ id, data }) {
   return prisma.organization.update({
     where: { id: oid },
     data: {
-      // ไม่ส่งฟิลด์ = ไม่แก้ไข, ส่งว่าง = เคลียร์เป็น null (สำหรับ name)
-      code:
-        typeof code === "undefined"
-          ? undefined
-          : (String(code).trim() === "" ? null : (typeof code === "string" ? code : Number(code))),
+      // ไม่ส่ง code = ไม่แก้ไข; ส่ง code ว่าง = เคลียร์เป็น null; ส่งค่าปกติ = string ที่ trim แล้ว
+      code: typeof data?.code === "undefined" ? undefined : (codeStr === "" ? null : codeStr), 
       nameTh: typeof nameTh === "undefined" ? undefined : (nameTh || null),
       nameEn: typeof nameEn === "undefined" ? undefined : (nameEn || null),
     },
@@ -137,7 +135,7 @@ export async function updateOrganizationService({ id, data }) {
 
 export async function softDeleteOrganizationService({ id }) {
   const oid = Number(id);
-  if (!Number.isFinite(oid)) throw new Error("INVALID_ID");
+  if (!Number.isFinite(oid)) throw new Error("ไอดีไม่ถูกต้อง");
   return prisma.organization.update({
     where: { id: oid },
     data: { deletedAt: new Date() },
@@ -147,7 +145,7 @@ export async function softDeleteOrganizationService({ id }) {
 
 export async function restoreOrganizationService({ id }) {
   const oid = Number(id);
-  if (!Number.isFinite(oid)) throw new Error("INVALID_ID");
+  if (!Number.isFinite(oid)) throw new Error("ไอดีไม่ถูกต้อง");
   return prisma.organization.update({
     where: { id: oid },
     data: { deletedAt: null },
@@ -157,10 +155,10 @@ export async function restoreOrganizationService({ id }) {
 
 export async function hardDeleteOrganizationService({ id }) {
   const oid = Number(id);
-  if (!Number.isFinite(oid)) throw new Error("INVALID_ID");
+  if (!Number.isFinite(oid)) throw new Error("ไอดีไม่ถูกต้อง");
   const usersCount = await prisma.user.count({ where: { orgId: oid } });
   if (usersCount > 0) {
-    const err = new Error("ORG_IN_USE");
+    const err = new Error("ที่ตั้งนี้มีผู้ใช้งานอยู่ ไม่สามารถลบได้");
     err.status = 409;
     throw err;
   }

@@ -1,3 +1,4 @@
+// src/controllers/auth.controller.js
 import { prisma } from "../prisma.js";
 import {
   registerService,
@@ -10,30 +11,56 @@ import {
   changePasswordService,
 } from "../services/auth.service.js";
 
-const isProd = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+const isProd = process.env.NODE_ENV === "production";
 const ACCESS_COOKIE = "access_token";
 const REFRESH_COOKIE = "refresh_token";
 
-function setAuthCookies(res, tokens) {
-  if (!tokens || !tokens.accessToken || !tokens.refreshToken) return;
-  const base = { httpOnly: true, sameSite: "lax", secure: isProd, path: "/" };
-  res.cookie(ACCESS_COOKIE, tokens.accessToken, { ...base, maxAge: (tokens.accessExp ?? 900) * 1000 });
-  res.cookie(REFRESH_COOKIE, tokens.refreshToken, { ...base, maxAge: (tokens.refreshExp ?? 604800) * 1000 });
+// ค่าจาก .env (วินาที)
+const ACCESS_TTL = Number(process.env.ACCESS_TTL_SEC || 900);
+const REFRESH_TTL = Number(process.env.REFRESH_TTL_SEC || 604800);
+
+// คอนฟิกคุกกี้ให้ถูกบริบท: dev = Lax/!Secure, prod(HTTPS) = None/Secure
+function cookieBase() {
+  if (isProd) {
+    return { httpOnly: true, path: "/", sameSite: "none", secure: true };
+  }
+  // dev: พอร์ต 3000 ↔ 4000 ถือว่า same-site ได้ ใช้ Lax จะติดคุกกี้แน่นอน
+  return { httpOnly: true, path: "/", sameSite: "lax", secure: false };
 }
+
+function setAuthCookies(res, tokens) {
+  if (!tokens?.accessToken || !tokens?.refreshToken) return;
+  const base = cookieBase();
+
+  res.cookie(ACCESS_COOKIE, tokens.accessToken, {
+    ...base,
+    maxAge: (tokens.accessExp ?? ACCESS_TTL) * 1000,
+  });
+  res.cookie(REFRESH_COOKIE, tokens.refreshToken, {
+    ...base,
+    maxAge: (tokens.refreshExp ?? REFRESH_TTL) * 1000,
+  });
+}
+
 function clearAuthCookies(res) {
-  const base = { httpOnly: true, sameSite: "lax", secure: isProd, path: "/" };
+  const base = cookieBase();
   res.clearCookie(ACCESS_COOKIE, base);
   res.clearCookie(REFRESH_COOKIE, base);
 }
+
 function sendError(res, e, fallback = 400) {
   const msg = e?.message || "UNKNOWN_ERROR";
   const status =
     e?.status ??
-    (msg === "LOGIN_FAILED" ? 401 :
-     msg === "INVALID_REFRESH" ? 401 :
-     msg === "USER_NOT_FOUND" ? 404 :
-     msg === "Email already in use" ? 409 :
-     fallback);
+    (msg === "LOGIN_FAILED"
+      ? 401
+      : msg === "INVALID_REFRESH"
+      ? 401
+      : msg === "USER_NOT_FOUND"
+      ? 404
+      : msg === "Email already in use"
+      ? 409
+      : fallback);
   return res.status(status).json({ ok: false, error: msg });
 }
 
@@ -41,7 +68,6 @@ function sendError(res, e, fallback = 400) {
 export async function registerController(req, res) {
   try {
     const user = await registerService({ prisma, payload: req.body || {} });
-    // ไม่ตั้ง cookie/ไม่คืน token: RegisterDialog แค่เช็ค ok
     return res.json({ ok: true, user });
   } catch (e) {
     return sendError(res, e);
@@ -54,7 +80,7 @@ export async function loginController(req, res) {
     const { email, password } = req.body || {};
     const result = await loginService({ prisma, email, password });
     setAuthCookies(res, result.tokens);
-    // คืนแบบแบนให้ local-auth.jsx ใช้ได้ทันที
+
     return res.json({
       ok: true,
       user: result.sessionUser,
@@ -77,11 +103,13 @@ export async function refreshController(req, res) {
       req.cookies?.refreshToken ||
       req.cookies?.REFRESH_TOKEN;
 
-    if (!token) return res.status(401).json({ ok: false, error: "NO_REFRESH_TOKEN" });
+    if (!token) {
+      return res.status(401).json({ ok: false, error: "NO_REFRESH_TOKEN" });
+    }
 
     const result = await refreshService({ prisma, refreshToken: token });
     setAuthCookies(res, result.tokens);
-    // คืนแบบแบนให้ local-auth.jsx ใช้ได้ทันที
+
     return res.json({
       ok: true,
       user: result.sessionUser,
@@ -97,7 +125,7 @@ export async function refreshController(req, res) {
 }
 
 /** POST /auth/logout */
-export async function logoutController(req, res) {
+export async function logoutController(_req, res) {
   try {
     await logoutService();
   } catch {}
@@ -108,12 +136,8 @@ export async function logoutController(req, res) {
 /** GET /auth/me */
 export async function meController(req, res) {
   try {
-    // ถ้ามี middleware ใส่ req.user.id ก็ใช้ได้เลย
     const id =
-      Number(req.user?.id) ||
-      Number(req.userId) ||
-      Number(req.auth?.sub) ||
-      null;
+      Number(req.user?.id) || Number(req.userId) || Number(req.auth?.sub) || null;
 
     if (!id) {
       return res.json({ ok: true, isAuthenticated: false, user: null });
@@ -129,7 +153,8 @@ export async function meController(req, res) {
 export async function forgotPasswordController(req, res) {
   try {
     const { email } = req.body || {};
-    if (!email) return res.status(400).json({ ok: false, error: "EMAIL_REQUIRED" });
+    if (!email)
+      return res.status(400).json({ ok: false, error: "EMAIL_REQUIRED" });
     await forgotPasswordService({ prisma, email });
     return res.json({ ok: true });
   } catch (e) {
@@ -148,27 +173,35 @@ export async function resetPasswordController(req, res) {
     if (!token || !newPassword) {
       return res.status(400).json({
         ok: false,
-        error: "TOKEN_OR_PASSWORD_REQUIRED",
+        error: "ต้องการข้อมูลเพิ่มเติม",
         details: { need: ["token", "newPassword"] },
       });
     }
     if (confirm !== undefined && confirm !== null && confirm !== newPassword) {
-      return res.status(400).json({ ok: false, error: "PASSWORD_CONFIRM_MISMATCH" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "รหัสผ่านไม่ตรงกัน", details: { confirm } });
     }
     if (String(newPassword).length < 8) {
-      return res.status(400).json({ ok: false, error: "PASSWORD_TOO_SHORT", details: { minLength: 8 } });
+      return res.status(400).json({
+        ok: false,
+        error: "รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร",
+        details: { minLength: 8 },
+      });
     }
 
     await resetPasswordService({ prisma, token, newPassword });
     return res.json({ ok: true });
   } catch (e) {
-    const raw = String(e?.message || "RESET_FAILED");
+    const raw = String(e?.message || "รีเซ็ตรหัสผ่านไม่สำเร็จ");
     let error = raw;
-    if (/TOKEN_INVALID/i.test(raw)) error = "TOKEN_INVALID";
-    else if (/TOKEN_EXPIRED/i.test(raw)) error = "TOKEN_EXPIRED";
-    else if (/TOKEN_ALREADY_USED/i.test(raw)) error = "TOKEN_ALREADY_USED";
-    else if (/TOKEN_OR_PASSWORD_REQUIRED/i.test(raw)) error = "TOKEN_OR_PASSWORD_REQUIRED";
-    else if (/PASSWORD_TOO_SHORT/i.test(raw)) error = "PASSWORD_TOO_SHORT";
+    if (/TOKEN_INVALID/i.test(raw)) error = "โทเค็นไม่ถูกต้อง";
+    else if (/TOKEN_EXPIRED/i.test(raw)) error = "โทเค็นหมดอายุ";
+    else if (/TOKEN_ALREADY_USED/i.test(raw)) error = "โทเค็นถูกใช้แล้ว";
+    else if (/TOKEN_OR_PASSWORD_REQUIRED/i.test(raw))
+      error = "ต้องการข้อมูลเพิ่มเติม";
+    else if (/PASSWORD_TOO_SHORT/i.test(raw))
+      error = "รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร";
     return res.status(400).json({ ok: false, error });
   }
 }
@@ -176,11 +209,9 @@ export async function resetPasswordController(req, res) {
 /** POST /auth/change-password (protected) */
 export async function changePasswordController(req, res) {
   try {
-    const userId =
-      Number(req.user?.id) ||
-      Number(req.userId) ||
-      Number(req.auth?.sub);
-    if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+    const userId = Number(req.user?.id) || Number(req.userId) || Number(req.auth?.sub);
+    if (!userId)
+      return res.status(401).json({ ok: false, error: "ไม่มีสิทธิ์เข้าใช้งาน" });
 
     const { currentPassword, newPassword } = req.body || {};
     await changePasswordService({ prisma, userId, currentPassword, newPassword });

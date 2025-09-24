@@ -2,7 +2,7 @@ import { prisma } from "../prisma.js";
 import { parsePaging, ilikeContains, pickSort, toInt } from "../services/query.util.js";
 import { submitContactService } from "../services/contacts.service.js";
 
-// POST /api/contacts (public) — บันทึก + ส่งอีเมล (ตามที่ปรับไว้ก่อนหน้า)
+// POST /api/contacts
 export async function createContactController(req, res) {
   try {
     const result = await submitContactService({ prisma, body: req.body || {} });
@@ -12,7 +12,7 @@ export async function createContactController(req, res) {
   }
 }
 
-// GET /api/contacts?q=&email=&dateFrom=&dateTo=&page=&limit=&sort=desc|asc
+// GET /api/contacts
 export async function listContactsController(req, res) {
   const { page, limit, skip, sort, sortBy } = parsePaging(req, { defaultLimit: 20, maxLimit: 200 });
   const q = req.query.q ? String(req.query.q) : "";
@@ -22,22 +22,11 @@ export async function listContactsController(req, res) {
 
   const where = {
     ...(q
-      ? {
-          OR: [
-            { name: ilikeContains(q) },
-            { subject: ilikeContains(q) },
-            { message: ilikeContains(q) },
-          ],
-        }
+      ? { OR: [{ name: ilikeContains(q) }, { subject: ilikeContains(q) }, { message: ilikeContains(q) }] }
       : {}),
     ...(email ? { email: ilikeContains(email) } : {}),
     ...(dateFrom || dateTo
-      ? {
-          createdAt: {
-            ...(dateFrom ? { gte: dateFrom } : {}),
-            ...(dateTo ? { lte: new Date(new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1) } : {}),
-          },
-        }
+      ? { createdAt: { ...(dateFrom ? { gte: dateFrom } : {}), ...(dateTo ? { lte: new Date(new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1) } : {}) } }
       : {}),
   };
 

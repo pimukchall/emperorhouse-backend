@@ -1,5 +1,3 @@
-// util ช่วยอ่าน query params + ทำ where/orderBy ให้ปลอดภัย
-
 export function parsePaging(req, { defaultLimit = 20, maxLimit = 100 } = {}) {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(maxLimit, Math.max(1, Number(req.query.limit || defaultLimit)));
@@ -17,7 +15,7 @@ export function ilikeContains(v) {
   if (v === undefined || v === null) return undefined;
   const s = String(v).trim();
   if (!s) return undefined;
-  return { contains: s }; // <-- ตัด mode ออก
+  return { contains: s };
 }
 
 export function toInt(v) {

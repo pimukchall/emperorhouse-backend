@@ -1,29 +1,18 @@
 import { prisma } from "../prisma.js";
 import { parsePaging, ilikeContains, toInt, pickSort } from "../services/query.util.js";
 
-// GET /api/departments?q=&page=&limit=&sort=&sortBy=
+// GET /api/departments
 export async function listDepartmentsController(req, res) {
   const { page, limit, skip, sort, sortBy } = parsePaging(req);
   const q = req.query.q ? String(req.query.q) : "";
 
   const where = q
-    ? {
-        OR: [
-          { code: ilikeContains(q) },
-          { nameTh: ilikeContains(q) },
-          { nameEn: ilikeContains(q) },
-        ],
-      }
+    ? { OR: [{ code: ilikeContains(q) }, { nameTh: ilikeContains(q) }, { nameEn: ilikeContains(q) }] }
     : {};
 
   const sortField = pickSort(sortBy, ["id", "code", "nameTh", "nameEn", "createdAt"]);
   const [rows, total] = await Promise.all([
-    prisma.department.findMany({
-      where,
-      orderBy: { [sortField]: sort },
-      skip,
-      take: limit,
-    }),
+    prisma.department.findMany({ where, orderBy: { [sortField]: sort }, skip, take: limit }),
     prisma.department.count({ where }),
   ]);
 
@@ -40,7 +29,7 @@ export async function getDepartmentController(req, res) {
   res.json({ ok: true, data: d });
 }
 
-// POST /api/departments (upsert by id?code unique)
+// POST /api/departments (upsert)
 export async function upsertDepartmentController(req, res) {
   try {
     const { id, code, nameTh, nameEn } = req.body || {};

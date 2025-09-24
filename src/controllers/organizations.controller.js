@@ -1,4 +1,3 @@
-// src/controllers/organizations.controller.js
 import {
   listOrganizationsService,
   getOrganizationService,
@@ -13,9 +12,12 @@ export async function listOrganizationsController(req, res) {
   try {
     const { page, limit, q, includeDeleted, sortBy, sort } = req.query;
     const out = await listOrganizationsService({
-      page, limit, q,
+      page,
+      limit,
+      q,
       includeDeleted: includeDeleted === "1" || includeDeleted === "true",
-      sortBy, sort,
+      sortBy,
+      sort,
     });
     res.json({ ok: true, data: out.items, meta: out.meta });
   } catch (e) {

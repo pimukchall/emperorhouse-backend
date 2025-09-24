@@ -1,29 +1,18 @@
 import { parsePaging, ilikeContains, pickSort } from "../services/query.util.js";
 import { prisma } from "../prisma.js";
 
-// GET /api/roles?q=&page=&limit=&sort=&sortBy=
+// GET /api/roles
 export async function listRolesController(req, res) {
   const { page, limit, skip, sort, sortBy } = parsePaging(req);
   const q = req.query.q ? String(req.query.q) : "";
 
   const where = q
-    ? {
-        OR: [
-          { name: ilikeContains(q) },
-          { labelTh: ilikeContains(q) },
-          { labelEn: ilikeContains(q) },
-        ],
-      }
+    ? { OR: [{ name: ilikeContains(q) }, { labelTh: ilikeContains(q) }, { labelEn: ilikeContains(q) }] }
     : {};
 
   const sortField = pickSort(sortBy, ["id", "name", "labelTh", "labelEn", "createdAt"]);
   const [rows, total] = await Promise.all([
-    prisma.role.findMany({
-      where,
-      orderBy: { [sortField]: sort },
-      skip,
-      take: limit,
-    }),
+    prisma.role.findMany({ where, orderBy: { [sortField]: sort }, skip, take: limit }),
     prisma.role.count({ where }),
   ]);
 
@@ -54,7 +43,6 @@ export async function deleteRoleController(req, res) {
     const name = req.params.name;
     if (!name) return res.status(400).json({ ok: false, error: "NAME_REQUIRED" });
 
-    // กันพลาด: ไม่ให้ลบ admin/user ถ้าอยากล็อกไว้
     if (["admin", "user"].includes(name.toLowerCase())) {
       return res.status(409).json({ ok: false, error: "BUILTIN_ROLE" });
     }

@@ -22,7 +22,7 @@ export async function getProfileService({ prisma: p = prisma, userId }) {
 
 // แก้ไขโปรไฟล์เฉพาะฟิลด์ที่อนุญาต
 export async function updateProfileService({ prisma: p = prisma, userId, data }) {
-  if (!userId) throw new Error("Unauthorized");
+  if (!userId) throw new Error("ไม่มีสิทธิ์เข้าใช้งาน");
   const allow = [
     "name","avatarPath",
     "employeeCode","employeeType","contractType",
@@ -40,8 +40,8 @@ export async function updateProfileService({ prisma: p = prisma, userId, data })
 
 // เซฟลายเซ็นจาก base64 → Bytes (ตัวเลือก)
 export async function saveSignatureService({ prisma: p = prisma, userId, signatureBase64 }) {
-  if (!userId) throw new Error("Unauthorized");
-  if (!signatureBase64) throw new Error("signature required");
+  if (!userId) throw new Error("ไม่มีสิทธิ์เข้าใช้งาน");
+  if (!signatureBase64) throw new Error("ไม่มีข้อมูลลายเซ็น");
   const base64 = signatureBase64.replace(/^data:\w+\/\w+;base64,/, "");
   const buf = Buffer.from(base64, "base64");
   return p.user.update({ where: { id: userId }, data: { signature: buf } });

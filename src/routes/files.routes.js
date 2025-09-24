@@ -1,9 +1,10 @@
+// src/routes/files.routes.js
 import { Router } from "express";
+import { requireAuth } from "../middlewares/auth.js";
 import {
   uploadAvatarSingle,
   uploadSignatureSingle,
 } from "../middlewares/upload.js";
-
 import {
   uploadAvatarController,
   getAvatarFileController,
@@ -11,22 +12,39 @@ import {
   getSignatureFileController,
 } from "../controllers/files.controller.js";
 
-// บังคับล็อกอิน (รองรับทั้ง req.user และ req.session.user)
-function requireAuth(req, res, next) {
-  const u = req.user || req.session?.user;
-  if (!u?.id) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
-  req.user = u; // map ให้ downstream ใช้ req.user ได้เสมอ
-  next();
-}
-
 const router = Router();
 
-// Avatar
-router.put("/profile/avatar", requireAuth, uploadAvatarSingle, uploadAvatarController);
+/**
+ * อัปโหลด Avatar (ต้องล็อกอิน)
+ * field name: "avatar" (multipart/form-data)
+ */
+router.put(
+  "/profile/files/user/avatar",
+  requireAuth,
+  uploadAvatarSingle,
+  uploadAvatarController
+);
+
+/**
+ * ดาวน์โหลด Avatar (สาธารณะ)
+ */
 router.get("/profile/files/user/avatar/:id", getAvatarFileController);
 
-// Signature
-router.put("/profile/signature", requireAuth, uploadSignatureSingle, uploadSignatureController);
+/**
+ * อัปโหลด Signature (ต้องล็อกอิน)
+ * field name: "signature" (multipart/form-data)
+ */
+router.put(
+  "/profile/files/user/signature",
+  requireAuth,
+  uploadSignatureSingle,
+  uploadSignatureController
+);
+
+/**
+ * ดาวน์โหลด Signature (สาธารณะ)
+ * ส่งเป็น image/png จาก Bytes ใน DB
+ */
 router.get("/profile/files/user/signature/:id", getSignatureFileController);
 
 export default router;

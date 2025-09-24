@@ -1,4 +1,3 @@
-// src/services/auth.service.js
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
@@ -66,7 +65,7 @@ async function getUserForSession(prisma, id) {
         },
       },
       userDepartments: {
-        where: { endedAt: null },
+        where: { endedAt: null, isActive: true, isActive: true },
         select: {
           positionLevel: true,
           positionName: true,
@@ -87,14 +86,14 @@ export async function registerService({ prisma, payload }) {
   const name = String(payload?.name ?? "").trim(); // optional
 
   if (!email || !password) {
-    if (!email && !password) throw new Error("missing email and password");
-    if (!email) throw new Error("missing email");
-    throw new Error("missing password");
+    if (!email && !password) throw new Error("ไม่พบอีเมลและรหัสผ่าน");
+    if (!email) throw new Error("ไม่พบอีเมล");
+    throw new Error("ไม่พบรหัสผ่าน");
   }
 
   // ป้องกันอีเมลซ้ำ
   const exists = await prisma.user.findFirst({ where: { email } });
-  if (exists) throw new Error("Email already in use");
+  if (exists) throw new Error("อีเมลนี้ถูกใช้งานแล้ว");
 
   const passwordHash = await bcrypt.hash(password, 10);
 
@@ -144,10 +143,10 @@ export async function loginService({ prisma, email, password }) {
     where: { email, deletedAt: null },
     select: { id: true, passwordHash: true, role: { select: { name: true } } },
   });
-  if (!user) throw new Error("LOGIN_FAILED");
+  if (!user) throw new Error("ไม่สามารถเข้าสู่ระบบได้");
 
   const ok = await bcrypt.compare(password || "", user.passwordHash || "");
-  if (!ok) throw new Error("LOGIN_FAILED");
+  if (!ok) throw new Error("ไม่สามารถเข้าสู่ระบบได้");
 
   const u = await getUserForSession(prisma, user.id);
   const sessionUser = toSessionUser(u);
@@ -170,10 +169,10 @@ export async function loginService({ prisma, email, password }) {
 export async function refreshService({ prisma, refreshToken }) {
   const decoded = verifyRefreshToken(refreshToken);
   const id = decoded?.sub;
-  if (!id) throw new Error("INVALID_REFRESH");
+  if (!id) throw new Error("ไม่สามารถต่ออายุการเข้าสู่ระบบได้");
 
   const u = await getUserForSession(prisma, Number(id));
-  if (!u) throw new Error("USER_NOT_FOUND");
+  if (!u) throw new Error("ไม่พบข้อมูลผู้ใช้");
 
   const sessionUser = toSessionUser(u);
   const accessToken = signAccessToken({ sub: u.id, role: u.role?.name || "user" });
@@ -221,7 +220,7 @@ export async function forgotPasswordService({ prisma, email }) {
 }
 
 export async function resetPasswordService({ prisma, token, newPassword }) {
-  if (!token || !newPassword) throw new Error("TOKEN_OR_PASSWORD_REQUIRED");
+  if (!token || !newPassword) throw new Error("ต้องระบุ token และรหัสผ่านใหม่");
 
   const rec = await prisma.passwordReset.findUnique({
     where: { token },
@@ -230,10 +229,10 @@ export async function resetPasswordService({ prisma, token, newPassword }) {
     },
   });
 
-  if (!rec) throw new Error("TOKEN_INVALID");
-  if (rec.usedAt) throw new Error("TOKEN_ALREADY_USED");
+  if (!rec) throw new Error("โทเค็นไม่ถูกต้อง");
+  if (rec.usedAt) throw new Error("โทเค็นถูกใช้งานแล้ว");
   if (rec.expiresAt && rec.expiresAt.getTime() < Date.now()) {
-    throw new Error("TOKEN_EXPIRED");
+    throw new Error("โทเค็นหมดอายุ");
   }
 
   const hash = await bcrypt.hash(newPassword, 10);
@@ -257,18 +256,18 @@ export async function resetPasswordService({ prisma, token, newPassword }) {
 }
 
 export async function changePasswordService({ prisma, userId, currentPassword, newPassword }) {
-  if (!userId) throw new Error("UNAUTHORIZED");
-  if (!newPassword) throw new Error("NEW_PASSWORD_REQUIRED");
+  if (!userId) throw new Error("ไม่พบผู้ใช้");
+  if (!newPassword) throw new Error("ต้องระบุรหัสผ่านใหม่");
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { id: true, email: true, passwordHash: true, firstNameTh: true, firstNameEn: true },
   });
-  if (!user) throw new Error("USER_NOT_FOUND");
+  if (!user) throw new Error("ไม่พบผู้ใช้");
 
-  if (!currentPassword) throw new Error("CURRENT_PASSWORD_REQUIRED");
+  if (!currentPassword) throw new Error("ต้องระบุรหัสผ่านปัจจุบัน");
   const ok = await bcrypt.compare(currentPassword, user.passwordHash || "");
-  if (!ok) throw new Error("CURRENT_PASSWORD_INCORRECT");
+  if (!ok) throw new Error("รหัสผ่านปัจจุบันไม่ถูกต้อง");
 
   const hash = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash } });
@@ -305,7 +304,7 @@ export async function meService({ prisma, userId }) {
         },
       },
       userDepartments: {
-        where: { endedAt: null },
+        where: { endedAt: null, isActive: true, isActive: true },
         select: {
           positionLevel: true,
           positionName: true,
@@ -324,6 +323,6 @@ export async function meService({ prisma, userId }) {
       gender: true,
     },
   });
-  if (!u) throw new Error("USER_NOT_FOUND");
+  if (!u) throw new Error("ไม่พบข้อมูลผู้ใช้");
   return u;
 }

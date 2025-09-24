@@ -19,10 +19,12 @@ function sendError(res, e, fallback = 400) {
   const msg = e?.message || "UNKNOWN_ERROR";
   const status =
     e?.status ??
-    (msg === "USER_NOT_FOUND" ? 404 :
-     msg === "DUPLICATE_EMPLOYEE_CODE" ? 409 :
-     fallback);
-  return res.status(status).json({ error: msg });
+    (msg === "USER_NOT_FOUND"
+      ? 404
+      : msg === "DUPLICATE_EMPLOYEE_CODE"
+      ? 409
+      : fallback);
+  return res.status(status).json({ ok: false, error: msg });
 }
 
 /* ----------------------------- Controllers ----------------------------- */
@@ -42,7 +44,7 @@ export async function listUsersController(req, res) {
       sortBy: sortBy ?? "id",
       sort: sort ?? "asc",
     });
-    return res.json(result);
+    return res.json({ ok: true, data: result.data, meta: result.meta });
   } catch (e) {
     return sendError(res, e);
   }
@@ -53,7 +55,7 @@ export async function getUserController(req, res) {
   try {
     const { id } = req.params;
     const data = await getUserService({ prisma, id });
-    return res.json({ data });
+    return res.json({ ok: true, data });
   } catch (e) {
     return sendError(res, e);
   }
@@ -64,7 +66,7 @@ export async function createUserController(req, res) {
   try {
     const data = req.body || {};
     const created = await createUserService({ prisma, data });
-    return res.json({ data: created });
+    return res.status(201).json({ ok: true, data: created });
   } catch (e) {
     return sendError(res, e);
   }
@@ -76,7 +78,7 @@ export async function updateUserController(req, res) {
     const { id } = req.params;
     const data = req.body || {};
     const updated = await updateUserService({ prisma, id, data });
-    return res.json({ data: updated });
+    return res.json({ ok: true, data: updated });
   } catch (e) {
     return sendError(res, e);
   }
@@ -88,7 +90,7 @@ export async function softDeleteUserController(req, res) {
     const { id } = req.params;
     const hard = bool(req.query?.hard, false);
     const deleted = await softDeleteUserService({ prisma, id, hard });
-    return res.json({ data: deleted });
+    return res.json({ ok: true, data: deleted });
   } catch (e) {
     return sendError(res, e);
   }
@@ -99,7 +101,7 @@ export async function restoreUserController(req, res) {
   try {
     const { id } = req.params;
     const data = await restoreUserService({ prisma, id });
-    return res.json({ data });
+    return res.json({ ok: true, data });
   } catch (e) {
     return sendError(res, e);
   }
@@ -112,14 +114,14 @@ export async function setPrimaryDepartmentController(req, res) {
     const { id } = req.params;
     const { departmentId } = req.body || {};
     if (!departmentId) {
-      return res.status(400).json({ error: "departmentId required" });
+      return res.status(400).json({ ok: false, error: "departmentId required" });
     }
     const data = await setPrimaryDepartmentService({
       prisma,
       userId: Number(id),
       departmentId: Number(departmentId),
     });
-    return res.json({ data });
+    return res.json({ ok: true, data });
   } catch (e) {
     return sendError(res, e);
   }

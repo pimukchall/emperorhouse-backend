@@ -3,15 +3,14 @@ import { selfUpdateProfileService } from "../services/users.service.js";
 
 export async function selfUpdateProfileController(req, res) {
   try {
-    // ดึง user id จากหลายแหล่งที่ middleware อาจจะใส่ไว้แตกต่างกัน
     const uid =
       req.user?.id ??
       req.auth?.user?.id ??
-      req.session?.user?.id ??
-      res.locals?.user?.id;
+      ((req.user?.id || req.userId || req.auth?.sub) ??
+      res.locals?.user?.id);
 
     if (!uid) {
-      return res.status(401).json({ error: "UNAUTHORIZED" });
+      return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
     }
 
     const updated = await selfUpdateProfileService({
@@ -20,8 +19,8 @@ export async function selfUpdateProfileController(req, res) {
       data: req.body ?? {},
     });
 
-    return res.json({ data: updated });
+    return res.json({ ok: true, data: updated });
   } catch (e) {
-    return res.status(400).json({ error: e?.message || "UPDATE_FAILED" });
+    return res.status(400).json({ ok: false, error: e?.message || "UPDATE_FAILED" });
   }
 }

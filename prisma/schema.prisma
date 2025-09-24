@@ -1,3 +1,6 @@
+// =====================================
+// Prisma Client & Datasource
+// =====================================
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,9 +10,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/**
- * ---------- Enums ----------
- */
+// =====================================
+// Enums
+// =====================================
+
 enum Gender {
   MALE
   FEMALE
@@ -45,9 +49,29 @@ enum PositionChangeKind {
   TRANSFER
 }
 
-/**
- * ---------- Masters ----------
- */
+enum EvalType {
+  OPERATIONAL // พนักงานปฏิบัติการ
+  SUPERVISOR // พนักงานบังคับบัญชา/วิชาชีพ
+}
+
+enum EvalStage {
+  MID_YEAR
+  YEAR_END
+}
+
+enum EvalStatus {
+  DRAFT
+  SUBMITTED
+  APPROVER_APPROVED
+  MD_APPROVED
+  COMPLETED
+  REJECTED
+}
+
+// =====================================
+// Masters
+// =====================================
+
 model Role {
   id      Int    @id @default(autoincrement())
   name    String @unique // 'admin' | 'user'
@@ -76,10 +100,10 @@ model Department {
 }
 
 model Organization {
-  id     Int    @id @default(autoincrement())
-  code   String @unique
-  nameTh String
-  nameEn String
+  id        Int       @id @default(autoincrement())
+  code      String    @unique
+  nameTh    String
+  nameEn    String
   deletedAt DateTime?
 
   users User[]
@@ -88,15 +112,16 @@ model Organization {
   updatedAt DateTime @updatedAt
 }
 
-/**
- * ---------- User / Employee Master ----------
- */
+// =====================================
+// User / Employee Master
+// =====================================
+
 model User {
   id Int @id @default(autoincrement())
 
   // Login identity
   name         String @default("")
-  email        String @unique
+  email        String @unique // NOTE: คง unique เดี่ยวเพื่อเลี่ยงปัญหา composite+NULL บน MySQL
   passwordHash String
 
   // Names
@@ -107,22 +132,26 @@ model User {
 
   // Role (one user -> one role)
   roleId Int
-  role   Role @relation(fields: [roleId], references: [id], map: "FK_User_roleId")
+  role   Role @relation(fields: [roleId], references: [id])
 
   // Organization / Work location (optional)
   orgId        Int?
-  organization Organization? @relation(fields: [orgId], references: [id], map: "FK_User_orgId")
+  organization Organization? @relation(fields: [orgId], references: [id])
 
   // Many departments (position per department)
   userDepartments UserDepartment[]
 
   // Primary department (1-1)
   primaryUserDeptId Int?            @unique
-  primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id], map: "FK_User_primaryUserDeptId")
+  primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id])
 
   // Position change logs (as subject & actor) — ฝั่งตรงข้ามของ PositionChangeLog
   positionChangeLogs      PositionChangeLog[] @relation("pcl_user")
   actedPositionChangeLogs PositionChangeLog[] @relation("pcl_actor")
+
+  evaluations Evaluation[] @relation("EvalOwner")
+  manageEvals Evaluation[] @relation("EvalManager")
+  mdEvals     Evaluation[] @relation("EvalMD")
 
   // Employee master fields
   employeeCode String?       @unique
@@ -146,7 +175,7 @@ model User {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  @@unique([email, deletedAt])
+  // indexes
   @@index([roleId])
   @@index([orgId])
   @@index([employeeType])
@@ -156,17 +185,18 @@ model User {
   @@index([deletedAt])
 }
 
-/**
- * ---------- User ↔ Department (historized) ----------
- */
+// =====================================
+// User ↔ Department (historized)
+// =====================================
+
 model UserDepartment {
   id Int @id @default(autoincrement())
 
   userId Int
-  user   User @relation(fields: [userId], references: [id], map: "FK_UserDepartment_userId")
+  user   User @relation(fields: [userId], references: [id])
 
   departmentId Int
-  department   Department @relation(fields: [departmentId], references: [id], map: "FK_UserDepartment_departmentId")
+  department   Department @relation(fields: [departmentId], references: [id])
 
   positionLevel PositionLevel
   positionName  String? // ชื่อตำแหน่งจริง เช่น 'QMR', 'Project Manager'
@@ -174,38 +204,42 @@ model UserDepartment {
   startedAt DateTime  @default(now())
   endedAt   DateTime? // null = active
 
+  // คุมความเป็น active ชัดเจน (แก้ปัญหา NULL ใน unique composite ของ MySQL)
+  isActive Boolean @default(true)
+
   // backlink for primary
   primaryOfUser User? @relation("primary_of_user")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // allow history (one active record per user+department)
-  @@unique([userId, departmentId, endedAt])
+  // อนุญาต history หลายระเบียน แต่ active ได้แค่ 1 ระเบียนต่อ user+department
+  @@unique([userId, departmentId, isActive])
   @@index([userId, departmentId])
   @@index([departmentId, positionLevel])
   @@index([startedAt])
   @@index([endedAt])
 }
 
-/**
- * ---------- Position change audit log ----------
- */
+// =====================================
+// Position change audit log
+// =====================================
+
 model PositionChangeLog {
   id   Int                @id @default(autoincrement())
   kind PositionChangeKind
 
   userId Int
-  user   User @relation("pcl_user", fields: [userId], references: [id], map: "FK_PCL_userId")
+  user   User @relation("pcl_user", fields: [userId], references: [id])
 
   fromDepartmentId Int?
-  fromDepartment   Department? @relation("pcl_fromDept", fields: [fromDepartmentId], references: [id], map: "FK_PCL_fromDepartmentId")
+  fromDepartment   Department? @relation("pcl_fromDept", fields: [fromDepartmentId], references: [id])
 
   toDepartmentId Int?
-  toDepartment   Department? @relation("pcl_toDept", fields: [toDepartmentId], references: [id], map: "FK_PCL_toDepartmentId")
+  toDepartment   Department? @relation("pcl_toDept", fields: [toDepartmentId], references: [id])
 
   actorId Int?
-  actor   User? @relation("pcl_actor", fields: [actorId], references: [id], map: "FK_PCL_actorId")
+  actor   User? @relation("pcl_actor", fields: [actorId], references: [id])
 
   fromLevel PositionLevel?
   toLevel   PositionLevel?
@@ -224,9 +258,10 @@ model PositionChangeLog {
   @@index([toDepartmentId])
 }
 
-/**
- * ---------- Password Reset ----------
- */
+// =====================================
+// Password Reset
+// =====================================
+
 model PasswordReset {
   id        Int       @id @default(autoincrement())
   userId    Int
@@ -235,15 +270,16 @@ model PasswordReset {
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "FK_PasswordReset_userId")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([token])
 }
 
-/**
- * ---------- Contact / Public Form ----------
- */
+// =====================================
+// Contact / Public Form
+// =====================================
+
 model ContactMessage {
   id        Int      @id @default(autoincrement())
   name      String   @db.VarChar(120)
@@ -255,4 +291,122 @@ model ContactMessage {
 
   @@index([createdAt])
   @@index([email])
+}
+
+// =====================================
+// CYCLES (รอบประเมิน)
+// =====================================
+
+model EvalCycle {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique // เช่น "2025_MID_YEAR"
+  year        Int
+  stage       EvalStage
+  openAt      DateTime
+  closeAt     DateTime
+  isActive    Boolean   @default(true)
+  isMandatory Boolean   @default(true)
+
+  evaluations Evaluation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([year, stage]) // ช่วย query รายงานตามปี/รอบ
+}
+
+// =====================================
+// EVALUATION (เก็บคะแนนรายข้อในตารางเดียว)
+// =====================================
+
+model Evaluation {
+  id Int @id @default(autoincrement())
+
+  // เจ้าของฟอร์ม (ผู้ถูกประเมิน)
+  ownerId Int
+  owner   User @relation("EvalOwner", fields: [ownerId], references: [id])
+
+  // ผู้อนุมัติ
+  managerId Int?
+  manager   User? @relation("EvalManager", fields: [managerId], references: [id])
+  mdId      Int?
+  md        User? @relation("EvalMD", fields: [mdId], references: [id])
+
+  // รอบ/ประเภท/สถานะ
+  cycleId Int
+  cycle   EvalCycle  @relation(fields: [cycleId], references: [id])
+  type    EvalType
+  stage   EvalStage
+  status  EvalStatus @default(DRAFT)
+
+  submittedAt DateTime?
+  approverAt  DateTime?
+  mdAt        DateTime?
+  completedAt DateTime?
+  rejectedAt  DateTime?
+
+  // ============= หมวด 1: ด้านการปฏิบัติงาน (เต็มรวม 40) =============
+  // ทุกข้อกรอก 0..10, คิดน้ำหนัก: 1.1–1.3 x2, 1.4–1.5 x1
+  s1_responsibility  Float? // 1.1 ความรับผิดชอบ /10
+  s1_development     Float? // 1.2 การพัฒนา /10
+  s1_workload        Float? // 1.3 ปริมาณงาน /10
+  s1_qualityStandard Float? // 1.4 มาตรฐานงาน /10
+  s1_coordination    Float? // 1.5 การประสานงาน /10
+
+  // ============= หมวด 2: ผลของงาน =============
+  // OPERATIONAL: ทุกข้อกรอก 0..10, น้ำหนัก x2 รวมเต็ม 30
+  // SUPERVISOR : 2.1–2.2 กรอก 0..10 (x2), 2.3–2.4 กรอก 0..5 (x1) รวมเต็ม 40
+  s2_valueOfWork          Float? // 2.1
+  s2_customerSatisfaction Float? // 2.2
+  s2_costEffectiveness    Float? // 2.3 (OP: /10, SV: /5)
+  s2_timeliness           Float? // 2.4 (OP: /10, SV: /5)
+
+  // ============= หมวด 3: คุณสมบัติฯ =============
+  // ทุกข้อกรอก 0..5 (12 ข้อ)
+  s3_jobKnowledge         Float? // 3.1
+  s3_attitude             Float? // 3.2
+  s3_contextUnderstanding Float? // 3.3
+  s3_systematicThinking   Float? // 3.4
+  s3_decisionMaking       Float? // 3.5
+  s3_adaptability         Float? // 3.6
+  s3_leadership           Float? // 3.7
+  s3_verbalComm           Float? // 3.8
+  s3_writtenComm          Float? // 3.9
+  s3_selflessness         Float? // 3.10
+  s3_ruleCompliance       Float? // 3.11
+  s3_selfReliance         Float? // 3.12
+
+  // ============= ช่องบรรยาย =============
+  t_potential           String? // ศักยภาพ
+  t_strengthsWeaknesses String? // จุดเด่น/จุดด้อย
+  t_trainingNeeds       String? // หัวข้ออบรมเพิ่มเติม
+
+  // ============= รวมคะแนน (cache สำหรับรายงาน) =============
+  scorePerf   Float? // หมวด 1 คำนวณตามน้ำหนัก -> เต็ม 40
+  scoreResult Float? // หมวด 2 -> เต็ม 30 (OP) / 40 (SV)
+  scoreComp   Float? // หมวด 3 -> เต็ม 30 (OP) / 20 (SV)
+  scoreTotal  Float? // รวม 100
+
+  // ============= ลายเซ็น/ความเห็น =============
+  ownerComment    String?
+  ownerSignedAt   DateTime?
+  managerComment  String?
+  managerSignedAt DateTime?
+  mdComment       String?
+  mdSignedAt      DateTime?
+  hrNote          String?
+  hrReceivedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Hard rule: 1 คน ต่อ 1 รอบ ได้ 1 ฟอร์ม
+  @@unique([cycleId, ownerId])
+  // ช่วย query approval/status
+  @@index([stage])
+  @@index([status])
+  @@index([managerId])
+  @@index([mdId])
+  // สำหรับรายงาน per cycle
+  @@index([cycleId, status])
 }

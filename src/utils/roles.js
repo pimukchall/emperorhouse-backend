@@ -23,7 +23,7 @@ export async function noAnotherMDinDepartment(prisma, departmentId, excludeUdId 
   const dup = await prisma.userDepartment.findFirst({
     where: {
       departmentId: Number(departmentId),
-      endedAt: null,
+      endedAt: null, isActive: true,
       positionLevel: "MD",
       ...(excludeUdId ? { NOT: { id: Number(excludeUdId) } } : {}),
     },

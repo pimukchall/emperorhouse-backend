@@ -5,7 +5,7 @@ import bcrypt from "bcrypt";
 ========================= */
 const EMPLOYEE_TYPES = ["DAILY", "MONTHLY"];
 const CONTRACT_TYPES = ["PERMANENT", "TEMPORARY", "PROBATION"];
-const GENDERS = ["MALE", "FEMALE", "OTHER"];
+const GENDERS = ["MALE", "FEMALE", "OTHER", "UNSPECIFIED"];
 
 /** Prefix ตาม contractType (อัปเดตตามสเปคใหม่) */
 const CONTRACT_PREFIX = {
@@ -115,10 +115,10 @@ export async function listUsersService({
   const ands = [];
   if (!includeDeleted) ands.push({ deletedAt: null });
   if (qq) ands.push({ OR: ors });
-  if (roleId) ands.push({ roleId: Number(roleId) }); // filter ด้วย scalar field ของ relation
+  if (roleId) ands.push({ roleId: Number(roleId) });
   if (departmentId) {
     ands.push({
-      userDepartments: { some: { departmentId: Number(departmentId), endedAt: null } },
+      userDepartments: { some: { departmentId: Number(departmentId), endedAt: null, isActive: true, isActive: true } },
     });
   }
 
@@ -230,7 +230,8 @@ export async function createUserService({ prisma, data }) {
         positionLevel: "STAF",
         positionName: null,
         startedAt: new Date(),
-        endedAt: null,
+        endedAt: null, isActive: true,
+        isActive: true,
       },
       select: { id: true },
     });
@@ -248,9 +249,22 @@ export async function createUserService({ prisma, data }) {
 ========================= */
 export async function updateUserService({ prisma, id, data }) {
   const user = await prisma.user.findUnique({ where: { id: Number(id) } });
-  if (!user) throw new Error("USER_NOT_FOUND");
+  if (!user) throw new Error("ไม่พบผู้ใช้งาน");
 
   const inData = { ...data };
+
+  // ป้องกันอีเมลซ้ำ (โยน 409 เองให้เคลียร์)
+  if ("email" in inData && inData.email) {
+    const exists = await prisma.user.findFirst({
+      where: { email: String(inData.email), id: { not: Number(id) } },
+      select: { id: true },
+    });
+    if (exists) {
+      const err = new Error("EMAIL_IN_USE");
+      err.status = 409;
+      throw err;
+    }
+  }
 
   // ----- สร้าง payload เฉพาะฟิลด์ที่ "ส่งมา" -----
   const out = { updatedAt: new Date() };
@@ -359,10 +373,10 @@ export async function setPrimaryDepartmentService({ prisma, userId, departmentId
   const uid = Number(userId);
   const did = Number(departmentId);
   const user = await prisma.user.findUnique({ where: { id: uid } });
-  if (!user) throw new Error("USER_NOT_FOUND");
+  if (!user) throw new Error("ไม่พบผู้ใช้งาน");
 
   let ud = await prisma.userDepartment.findFirst({
-    where: { userId: uid, departmentId: did, endedAt: null },
+    where: { userId: uid, departmentId: did, endedAt: null, isActive: true, isActive: true },
     select: { id: true },
   });
 
@@ -374,7 +388,8 @@ export async function setPrimaryDepartmentService({ prisma, userId, departmentId
         positionLevel: "STAF",
         positionName: null,
         startedAt: new Date(),
-        endedAt: null,
+        endedAt: null, isActive: true,
+        isActive: true,
       },
       select: { id: true },
     });
@@ -389,7 +404,7 @@ export async function setPrimaryDepartmentService({ prisma, userId, departmentId
 ========================= */
 export async function selfUpdateProfileService({ prisma, userId, data }) {
   const user = await prisma.user.findUnique({ where: { id: Number(userId) } });
-  if (!user) throw new Error("USER_NOT_FOUND");
+  if (!user) throw new Error("ไม่พบผู้ใช้งาน");
 
   const allowed = [
     "name", "firstNameTh", "lastNameTh", "firstNameEn", "lastNameEn",
