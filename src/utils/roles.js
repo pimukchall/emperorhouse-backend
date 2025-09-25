@@ -1,24 +1,38 @@
-export const PositionLevels = ["STAF", "SVR", "ASST", "MANAGER", "MD"];
-export const levelRank = Object.fromEntries(PositionLevels.map((lv, i) => [lv, i]));
-export const SPECIAL = { QMR_DEPT_CODE: "QMS" };
+export {
+  isAdmin,
+  hasRole, 
+  levelRank, 
+  hasLevelAtLeast,  
+  isMD,             
+  inDepartmentAny, 
+  inDepartment,
+  inQMS
+} from "../middlewares/roles.js";
 
-export function isAdmin(me)   { return (me?.roleName || "").toLowerCase() === "admin"; }
-export function isMD(me)      { return (me?.roleName || "").toLowerCase() === "md"; }       // เผื่ออนาคต
-export function isManager(me) { return (me?.roleName || "").toLowerCase() === "manager"; }  // เผื่ออนาคต
+export const PositionLevels = ["STAF", "SVR", "ASST", "MANAGER", "MD"];
+
+export const LevelRankMap = { STAF: 0, SVR: 1, ASST: 2, MANAGER: 3, MD: 4 };
 
 export function canSetLevel(actor, toLevel) {
   const lv = String(toLevel || "").toUpperCase();
-  if (!levelRank.hasOwnProperty(lv)) return false;
+  if (!LevelRankMap.hasOwnProperty(lv)) return false;
+
+  // admin ได้สูงสุด
   if (isAdmin(actor)) return true;
-  if (isMD(actor)) return levelRank[lv] <= levelRank["MD"];
-  if (isManager(actor)) return levelRank[lv] <= levelRank["MANAGER"];
-  return levelRank[lv] <= levelRank["ASST"];
+
+  // MD ตาม "ตำแหน่ง" (ไม่ใช่ role) → ตั้งได้ถึง MD
+  if (isMD(actor)) return LevelRankMap[lv] <= LevelRankMap["MD"];
+
+  // ถ้าอยากรองรับ manager แบบ "ตำแหน่ง" (ไม่ใช่ role) ให้ใช้ hasLevelAtLeast
+  if (hasLevelAtLeast(actor, "MANAGER")) {
+    return LevelRankMap[lv] <= LevelRankMap["MANAGER"];
+  }
+
+  // อื่น ๆ จำกัดไว้ไม่เกิน ASST
+  return LevelRankMap[lv] <= LevelRankMap["ASST"];
 }
 
-export function ensureQmrInQms(dept) {
-  return String(dept?.code || "").toUpperCase() === SPECIAL.QMR_DEPT_CODE;
-}
-
+// NOTE: ฟังก์ชันนี้ฝั่ง server เท่านั้น (ต้องส่ง prisma เข้ามา)
 export async function noAnotherMDinDepartment(prisma, departmentId, excludeUdId = null) {
   const dup = await prisma.userDepartment.findFirst({
     where: {

@@ -1,5 +1,3 @@
-// ----- Roles (ระบบใหม่: 'admin' | 'user')
-// ใช้กับ object ที่มี { roleName, primaryLevel, departments }
 export function isAdmin(me) {
   return (me?.roleName || "").toLowerCase() === "admin";
 }
@@ -7,8 +5,8 @@ export function hasRole(me, name) {
   return (me?.roleName || "").toLowerCase() === String(name).toLowerCase();
 }
 
-// ----- Position Levels (จาก primary dept): STAF, SVR, ASST, MANAGER, MD -----
 const LEVEL_RANK = { STAF: 0, SVR: 1, ASST: 2, MANAGER: 3, MD: 4 };
+
 export function levelRank(me) {
   const lv = String(me?.primaryLevel || "").toUpperCase();
   return LEVEL_RANK[lv] ?? -1;

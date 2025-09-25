@@ -1,4 +1,3 @@
-// src/services/eval-cycles.service.js
 import { prisma } from "../prisma.js";
 
 export async function listCyclesService({ page = 1, limit = 50, sortBy = "year", sort = "desc" } = {}) {
@@ -49,7 +48,15 @@ export async function createCycleService(data) {
 
 export async function updateCycleService(id, data) {
   const payload = {};
-  if (data.code !== undefined) payload.code = data.code || null;
+  if (data.code !== undefined) {
+    const code = String(data.code).trim();
+    if (!code) {
+      const e = new Error("รหัสรอบการประเมินไม่ถูกต้อง");
+      e.status = 400;
+      throw e;
+    }
+    payload.code = code;
+  }
   if (data.year !== undefined) payload.year = Number(data.year);
   if (data.stage !== undefined) payload.stage = String(data.stage).toUpperCase();
   if (data.openAt !== undefined) payload.openAt = new Date(data.openAt);

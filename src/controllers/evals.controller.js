@@ -1,4 +1,3 @@
-// src/controllers/evals.controller.js
 import {
   createEvaluation,
   getEvaluation,
@@ -61,13 +60,9 @@ export async function createEvalController(req, res) {
 
 export async function updateEvalController(req, res) {
   try {
-    const id = Number(req.params.id);
-    const data = req.body || {};
-    const row = await updateEvaluation(id, data, currentUserId(req));
+    const row = await updateEvaluation(Number(req.params.id), req.body, req.me.id);
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
+  } catch (e) { sendErr(res, e); }
 }
 
 export async function submitEvalController(req, res) {

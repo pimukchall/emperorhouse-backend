@@ -1,6 +1,5 @@
-// src/routes/evals.routes.js
 import { Router } from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireMe, requireRole } from "../middlewares/auth.js";
 import {
   listEvalsController,
   getEvalController,
@@ -15,18 +14,21 @@ import {
 } from "../controllers/evals.controller.js";
 
 const router = Router();
-router.use(requireAuth);
 
-// LIST / FILTER
+// ต้องล็อกอินทุกเส้นทาง และแนบ snapshot me สำหรับกฎ MD/admin/department
+router.use(requireAuth, requireMe);
+
+// LIST/FILTER
 router.get("/", listEvalsController);
+
+// ✅ ต้องมาก่อน "/:id" ไม่งั้นชนเป็น :id
+router.get("/eligible/:cycleId", listEligibleController);
 
 // READ
 router.get("/:id", getEvalController);
 
-// CREATE
+// CREATE & UPDATE (เงื่อนไขระดับ field จะตรวจใน service/controller อยู่แล้ว)
 router.post("/", createEvalController);
-
-// UPDATE (DRAFT/REJECTED only by owner)
 router.put("/:id", updateEvalController);
 
 // TRANSITIONS
@@ -35,10 +37,7 @@ router.post("/:id/approve", approveManagerController);
 router.post("/:id/md-approve", approveMDController);
 router.post("/:id/reject", rejectEvalController);
 
-// DELETE (ตามสิทธิ์ใน service/route ชั้นบน)
-router.delete("/:id", deleteEvalController);
-
-// ELIGIBLE (ใครที่ฉันสร้างให้ได้ในรอบนี้)
-router.get("/eligible/:cycleId", listEligibleController);
+// DELETE — จำกัดเฉพาะ admin/hr
+router.delete("/:id", requireRole("admin", "hr"), deleteEvalController);
 
 export default router;
