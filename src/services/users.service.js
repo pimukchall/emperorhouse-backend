@@ -118,7 +118,7 @@ export async function listUsersService({
   if (roleId) ands.push({ roleId: Number(roleId) });
   if (departmentId) {
     ands.push({
-      userDepartments: { some: { departmentId: Number(departmentId), endedAt: null, isActive: true, isActive: true } },
+      userDepartments: { some: { departmentId: Number(departmentId), endedAt: null, isActive: true } },
     });
   }
 
@@ -134,23 +134,7 @@ export async function listUsersService({
       orderBy,
       skip,
       take: l,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: { select: { id: true, name: true } },
-        employeeCode: true,
-        contractType: true,
-        deletedAt: true,
-        primaryUserDept: {
-          select: {
-            id: true,
-            positionLevel: true,
-            positionName: true,
-            department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
-          },
-        },
-      },
+      include: baseInclude, // ✅ ส่ง organization, role, primaryUserDept, userDepartments ออกมาครบ
     }),
     prisma.user.count({ where }),
   ]);
@@ -230,7 +214,7 @@ export async function createUserService({ prisma, data }) {
         positionLevel: "STAF",
         positionName: null,
         startedAt: new Date(),
-        endedAt: null, isActive: true,
+        endedAt: null,
         isActive: true,
       },
       select: { id: true },
@@ -376,7 +360,7 @@ export async function setPrimaryDepartmentService({ prisma, userId, departmentId
   if (!user) throw new Error("ไม่พบผู้ใช้งาน");
 
   let ud = await prisma.userDepartment.findFirst({
-    where: { userId: uid, departmentId: did, endedAt: null, isActive: true, isActive: true },
+    where: { userId: uid, departmentId: did, endedAt: null, isActive: true },
     select: { id: true },
   });
 
@@ -388,7 +372,7 @@ export async function setPrimaryDepartmentService({ prisma, userId, departmentId
         positionLevel: "STAF",
         positionName: null,
         startedAt: new Date(),
-        endedAt: null, isActive: true,
+        endedAt: null,
         isActive: true,
       },
       select: { id: true },
