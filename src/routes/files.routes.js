@@ -1,4 +1,3 @@
-// src/routes/files.routes.js
 import { Router } from "express";
 import { requireAuth } from "../middlewares/auth.js";
 import {
@@ -15,8 +14,9 @@ import {
 const router = Router();
 
 /**
- * อัปโหลด Avatar (ต้องล็อกอิน)
- * field name: "avatar" (multipart/form-data)
+ * ───────────────── Avatar ─────────────────
+ * PUT /api/profile/files/user/avatar      (multipart field: "avatar")
+ * GET /api/profile/files/user/avatar/:id  → redirect ไปลิงก์ไฟล์ (PUBLIC)
  */
 router.put(
   "/profile/files/user/avatar",
@@ -24,15 +24,12 @@ router.put(
   uploadAvatarSingle,
   uploadAvatarController
 );
-
-/**
- * ดาวน์โหลด Avatar (สาธารณะ)
- */
 router.get("/profile/files/user/avatar/:id", getAvatarFileController);
 
 /**
- * อัปโหลด Signature (ต้องล็อกอิน)
- * field name: "signature" (multipart/form-data)
+ * ───────────────── Signature ─────────────────
+ * PUT /api/profile/files/user/signature   (multipart field: "signature" หรือ JSON {signature: base64})
+ * GET /api/profile/files/user/signature/:id → ส่ง image/png จาก Bytes ใน DB (PUBLIC)
  */
 router.put(
   "/profile/files/user/signature",
@@ -40,11 +37,23 @@ router.put(
   uploadSignatureSingle,
   uploadSignatureController
 );
+router.get("/profile/files/user/signature/:id", getSignatureFileController);
 
 /**
- * ดาวน์โหลด Signature (สาธารณะ)
- * ส่งเป็น image/png จาก Bytes ใน DB
+ * ───────────────── Backward-compatible aliases ─────────────────
+ * สำหรับ FE เก่า ที่เรียก /api/profile/avatar และ /api/profile/signature
  */
-router.get("/profile/files/user/signature/:id", getSignatureFileController);
+router.put(
+  "/profile/avatar",
+  requireAuth,
+  uploadAvatarSingle,
+  uploadAvatarController
+);
+router.put(
+  "/profile/signature",
+  requireAuth,
+  uploadSignatureSingle,
+  uploadSignatureController
+);
 
 export default router;

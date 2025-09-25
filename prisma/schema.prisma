@@ -152,6 +152,7 @@ model User {
   evaluations Evaluation[] @relation("EvalOwner")
   manageEvals Evaluation[] @relation("EvalManager")
   mdEvals     Evaluation[] @relation("EvalMD")
+  createdEvals Evaluation[] @relation("EvalCreator")
 
   // Employee master fields
   employeeCode String?       @unique
@@ -322,9 +323,13 @@ model EvalCycle {
 model Evaluation {
   id Int @id @default(autoincrement())
 
-  // เจ้าของฟอร์ม (ผู้ถูกประเมิน)
+  // ผู้ถูกประเมิน
   ownerId Int
   owner   User @relation("EvalOwner", fields: [ownerId], references: [id])
+
+  // ผู้ยื่น/ผู้สร้างแบบ (กรณี self-assessment จะ = ownerId)
+  createdById Int
+  createdBy   User @relation("EvalCreator", fields: [createdById], references: [id])
 
   // ผู้อนุมัติ
   managerId Int?
@@ -387,26 +392,31 @@ model Evaluation {
   scoreComp   Float? // หมวด 3 -> เต็ม 30 (OP) / 20 (SV)
   scoreTotal  Float? // รวม 100
 
-  // ============= ลายเซ็น/ความเห็น =============
-  ownerComment    String?
-  ownerSignedAt   DateTime?
-  managerComment  String?
-  managerSignedAt DateTime?
-  mdComment       String?
-  mdSignedAt      DateTime?
+  // ============= ความเห็น/ลายเซ็น (ของ "ผู้ยื่น") =============
+  submitterComment   String?
+  submitterSignedAt  DateTime?
+  submitterSignature Bytes?   // ลายเซ็นผู้ยื่น (owner เองใน flow ปกติ)
+
+  // ความเห็น/ลายเซ็นของผู้อนุมัติ
+  managerComment     String?
+  managerSignedAt    DateTime?
+  managerSignature   Bytes?
+
+  mdComment          String?
+  mdSignedAt         DateTime?
+  mdSignature        Bytes?
+
   hrNote          String?
   hrReceivedAt    DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Hard rule: 1 คน ต่อ 1 รอบ ได้ 1 ฟอร์ม
   @@unique([cycleId, ownerId])
-  // ช่วย query approval/status
+  @@index([createdById])
   @@index([stage])
   @@index([status])
   @@index([managerId])
   @@index([mdId])
-  // สำหรับรายงาน per cycle
   @@index([cycleId, status])
 }

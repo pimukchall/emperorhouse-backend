@@ -1,170 +1,98 @@
-// src/index.js
-import path from 'node:path';
-import express from 'express';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import morgan from 'morgan';
-import helmet from 'helmet';
-import jwt from 'jsonwebtoken';
-import { fileURLToPath } from 'url';
-import { config as dotenvConfig } from 'dotenv';
-import { ensureUploadDirs, UPLOADS_BASE } from './lib/paths.js';
+import path from "node:path";
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import morgan from "morgan";
+import helmet from "helmet";
+import { config as dotenvConfig } from "dotenv";
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 0) Load environment (.env.development / .env.production)
-// ───────────────────────────────────────────────────────────────────────────────
-const NODE_ENV = process.env.NODE_ENV ?? 'development';
-const envFile = NODE_ENV === 'production' ? '.env.production' : '.env.development';
+// ===== env (.env.development / .env.production)
+const NODE_ENV = process.env.NODE_ENV ?? "development";
+const envFile =
+  NODE_ENV === "production" ? ".env.production" : ".env.development";
 dotenvConfig({ path: path.resolve(process.cwd(), envFile) });
 
-// ----- routes -----
-import authRouter from './routes/auth.routes.js';
-import usersRouter from './routes/users.routes.js';
-import userDepartmentsChildRouter from './routes/user-departments.routes.js';
-import rolesRouter from './routes/roles.routes.js';
-import departmentsRouter from './routes/departments.routes.js';
-import filesRouter from './routes/files.routes.js';
-import contactsRouter from './routes/contacts.routes.js';
-import organizationsRouter from './routes/organizations.routes.js';
-import profileRouter from './routes/profile.routes.js';
+const IS_PROD = NODE_ENV === "production";
+const PORT = Number(process.env.PORT || 4000);
+const FRONTEND_BASE_URL =
+  process.env.FRONTEND_BASE_URL || "http://localhost:3000";
+
+// ===== import routes (ทุกอย่างจะ mount ใต้ /api)
+import authRouter from "./routes/auth.routes.js";
+import usersRouter from "./routes/users.routes.js";
+import userDepartmentsChildRouter from "./routes/user-departments.routes.js";
+import rolesRouter from "./routes/roles.routes.js";
+import departmentsRouter from "./routes/departments.routes.js";
+import filesRouter from "./routes/files.routes.js";
+import contactsRouter from "./routes/contacts.routes.js";
+import organizationsRouter from "./routes/organizations.routes.js";
+import profileRouter from "./routes/profile.routes.js";
 import evalsRouter from "./routes/evals.routes.js";
 import cyclesRouter from "./routes/cycles.routes.js";
 
-// Resolve paths
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '..');
-
-const IS_PROD = NODE_ENV === 'production';
-const PORT = Number(process.env.PORT || 4000);
-
-// ───────────────────────────────────────────────────────────────────────────────
-// 1) Core Config
-// ───────────────────────────────────────────────────────────────────────────────
-const FRONTEND_BASE_URL =
-  process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
-
-const JWT_ACCESS_SECRET =
-  process.env.JWT_ACCESS_SECRET || 'dev-access-secret';
-
-// require secret in prod
-if (IS_PROD && !process.env.JWT_ACCESS_SECRET) {
-  console.error('FATAL: JWT_ACCESS_SECRET is required in production.');
-  process.exit(1);
-}
-
-// เตรียมโฟลเดอร์อัปโหลด (นอกโปรเจกต์) ตามค่าใน paths.js
-ensureUploadDirs();
-
-// ───────────────────────────────────────────────────────────────────────────────
-// 2) Express App
-// ───────────────────────────────────────────────────────────────────────────────
 const app = express();
-
-// trust proxy เฉพาะ prod (ต้องมากหลังสร้าง app)
-if (IS_PROD) {
-  app.set('trust proxy', 1);
-}
-
-app.disable('x-powered-by');
+if (IS_PROD) app.set("trust proxy", 1);
 
 // security headers
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: 'same-site' },
-  })
-);
+app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
 
-// CORS
-app.use(
-  cors({
-    origin: FRONTEND_BASE_URL,
-    credentials: true,
-  })
-);
+// CORS + cookie
+app.use(cors({ origin: FRONTEND_BASE_URL, credentials: true }));
 app.options(/.*/, cors({ origin: FRONTEND_BASE_URL, credentials: true }));
 
-// logger
-app.use(morgan(IS_PROD ? 'combined' : 'dev'));
-
-// parsers
-app.use(express.json({ limit: '5mb' }));
+// parsers & logs
+app.use(morgan(IS_PROD ? "combined" : "dev"));
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// static files
+// static files (เช่น avatar) — นอก /api
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 app.use(
-  '/files',
-  express.static(UPLOADS_BASE, {
+  "/files",
+  express.static(UPLOADS_DIR, {
     setHeaders: (res) => {
-      res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+      res.setHeader("X-Content-Type-Options", "nosniff");
     },
   })
 );
 
-// attach user from JWT (cookie-first, fallback bearer)
-app.use((req, _res, next) => {
-  const fromCookie = req.cookies?.access_token;
-  const fromBearer = req.headers.authorization?.startsWith('Bearer ')
-    ? req.headers.authorization.slice(7)
-    : null;
+// ===== helper
+const API = (p = "") => `/api${p}`;
 
-  const token = fromCookie || fromBearer;
-  if (token) {
-    try {
-      const payload = jwt.verify(token, JWT_ACCESS_SECRET);
-      req.user = payload;
-      req.userId = payload.sub;
-      req.auth = payload;
-    } catch {
-      // ignore invalid
-    }
-  }
-  next();
-});
-
-// ───────────────────────────────────────────────────────────────────────────────
-// 3) Routes
-// ───────────────────────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => {
+// ===== health
+app.get(API("/health"), (_req, res) => {
   res.json({ ok: true, env: NODE_ENV, time: new Date().toISOString() });
 });
 
-app.use('/auth', authRouter);
-app.use('/api/users', usersRouter);
-app.use('/api/users/:id/departments', userDepartmentsChildRouter);
-app.use('/api/roles', rolesRouter);
-app.use('/api/departments', departmentsRouter);
-app.use(filesRouter); // ต้องมี basePath ภายใน
-app.use('/api/contacts', contactsRouter);
-app.use('/api/organizations', organizationsRouter);
-app.use('/api/profile', profileRouter);
-app.use("/api/evals", evalsRouter);
-app.use("/api/cycles", cyclesRouter);
+// ===== mount routes (ทุกอย่างใต้ /api)
+// หมายเหตุ: การตรวจ auth/me อยู่ในไฟล์ route แต่ละอัน (ผ่าน requireAuth/requireMe)
+app.use(API("/auth"), authRouter);
+app.use(API("/users"), usersRouter);
+app.use(API("/users/:id/departments"), userDepartmentsChildRouter);
+app.use(API("/roles"), rolesRouter);
+app.use(API("/departments"), departmentsRouter);
+app.use(API(""), filesRouter); // มี /api/profile/files/... อยู่ในไฟล์นี้
+app.use(API("/contacts"), contactsRouter);
+app.use(API("/organizations"), organizationsRouter);
+app.use(API("/profile"), profileRouter);
+app.use(API("/evals"), evalsRouter);
+app.use(API("/cycles"), cyclesRouter);
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 4) Error Handlers
-// ───────────────────────────────────────────────────────────────────────────────
-app.use((_req, res) => {
-  res.status(404).json({ ok: false, error: 'Not Found' });
-});
-
+// ===== 404 + error handler
+app.use((_req, res) => res.status(404).json({ ok: false, error: "Not Found" }));
 app.use((err, _req, res, _next) => {
-  console.error('Unhandled Error:', err);
-  const status = err.status || 500;
-  res.status(status).json({
+  console.error("Unhandled Error:", err);
+  res.status(err?.status || 500).json({
     ok: false,
-    error: IS_PROD ? 'Internal Server Error' : (err.message || 'Internal Error'),
-    ...(IS_PROD ? {} : { stack: err.stack }),
+    error: IS_PROD ? "Internal Server Error" : err?.message || "Internal Error",
   });
 });
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 5) Start
-// ───────────────────────────────────────────────────────────────────────────────
+// ===== start
 app.listen(PORT, () => {
   console.log(
-    `API ready on http://localhost:${PORT} [env=${NODE_ENV}] (files: /files → ${UPLOADS_BASE})`
+    `API ready on http://localhost:${PORT} [env=${NODE_ENV}] (all under /api)`
   );
 });
