@@ -88,7 +88,7 @@ app.use(API("/contacts"), contactsRouter);
 app.use(API("/organizations"), organizationsRouter);
 app.use(API("/profile"), profileRouter);
 app.use(API("/evals"), evalsRouter);
-app.use(API("/cycles"), evalCyclesRouter);
+app.use(API("/eval-cycles"), evalCyclesRouter);
 
 // 404 + error handler (มาตรฐานอ่านง่าย)
 app.use(notFound);
