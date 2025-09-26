@@ -1,265 +1,242 @@
-# Express + Prisma + MySQL Boilerplate (JS)
+# EMP One Backend
 
-แบ็กเอนด์พร้อมใช้สำหรับระบบองค์กร: **Local Login (Cookie Session)**, **Users / Roles / Departments CRUD**, **Soft Delete & Hard Delete (admin เท่านั้น)**, **อัปโหลด Avatar ด้วย multer + sharp (เก็บไฟล์นอกโปรเจ็กต์)**
-
-## ✨ ฟีเจอร์หลัก
-- **Auth (Local)**: `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`, `/auth/change-password`
-  - Cookie session อายุ **1 วัน** หรือ **7 วัน** เมื่อส่ง `remember: true`
-- **Users**
-  - CRUD + **Soft delete (ผู้ใช้ลบตัวเอง/แอดมินลบได้)** + **Hard delete (เฉพาะ admin)** + **Restore**
-  - `reset-password` (admin เท่านั้น)
-  - ค้นหา/กรอง/แบ่งหน้า/เรียงลำดับ
-- **Roles / Departments**
-  - CRUD + ป้องกันลบเมื่อมีผู้ใช้อ้างอิง (FK in use)
-- **Avatar Upload**
-  - PUT `/profile/avatar` (multipart/form-data)
-  - บีบเป็น `.webp` ขนาดสูงสุด 512×512, เก็บที่ `../upload/user/avatar/{userId}/avatar.webp` (นอกโปรเจกต์)
-  - **ค่าเริ่มต้นใช้เสิร์ฟแบบ Dynamic Route** → `GET /profile/files/user/avatar/:userId` (ปลอดภัยกว่าเปิดทั้งโฟลเดอร์)
-- **Prisma + MySQL** พร้อมสคริปต์ `migrate` / `seed`
+REST API ของ Emperorhouse  
+Stack: **Node.js (Express 5)** · **Prisma** · **MySQL** · **JWT** · **Multer** · **Nodemailer**
 
 ---
 
-## 🧱 เทคโนโลยี
-- Node.js 20+, Express, cookie-session
-- Prisma ORM + MySQL 8
-- Multer (upload) + Sharp (แปลง/บีบรูป)
-- ESM (`"type": "module"`)
+## 🚀 Quick Start
 
----
-
-## ✅ ความต้องการระบบ
-- Node.js **v20+**
-- MySQL **8+** (โลคัลหรือ Docker)
-
----
-
-## 🚀 เริ่มต้นใช้งาน (Quick Start)
-
-1) ติดตั้งแพ็กเกจ
+### 1) ติดตั้ง
 ```bash
 npm install
 ```
 
-2) ตั้งค่าไฟล์ `.env` (ที่รากโปรเจกต์)
-```env
-DATABASE_URL="mysql://root:password@localhost:3306/express_prisma_db"
+### 2) ตั้งค่า Environment
+ใช้สองไฟล์หลัก:
+- `.env.development`
+- `.env.production`
 
+มีตัวอย่างที่ `.env.example` ให้ก็อปแล้วแก้ค่าได้ทันที
+
+ค่าที่แนะนำให้มีอย่างน้อย:
+```
 PORT=4000
 NODE_ENV=development
 
-# session
-SESSION_SECRET="replace-with-a-long-random-secret"
-SESSION_NAME="sid"
-SESSION_DOMAIN=
+# Database
+DATABASE_URL="mysql://user:pass@localhost:3306/EMP_DB"
+
+# App
+API_PREFIX=api
+AUTH_PREFIX=auth
+FRONTEND_BASE_URL=http://localhost:3000
+
+# JWT
+JWT_ACCESS_SECRET="change-me"
+JWT_REFRESH_SECRET="change-me"
+ACCESS_TTL_SEC=900
+REFRESH_TTL_SEC=604800
+
+# Mail
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=
+SMTP_PASS=
+MAIL_FROM="EMP One" <no-reply@emperorhouse.com>
+MAIL_TO="pimuk_ar@emperorhouse.com"
+
+# Upload
+UPLOAD_BASE_DIR=./uploads
+
+# RBAC (สำหรับ MD)
+EXEC_DEPT_CODES=MGT
 ```
 
-3) (ทางเลือก) ใช้ Docker สำหรับ MySQL  
-มี `docker-compose.yml` ให้แล้ว:
+> โปรดอย่าพุช `.env*` ขึ้น Git — ใช้ `.env.example` เป็นแม่แบบเท่านั้น
+
+### 3) Prisma & DB
 ```bash
-docker compose up -d
+# Development
+npm run db:generate:dev
+npm run db:migrate:dev
+npm run db:seed:dev     # ถ้ามี seed.js
+
+# Production (deploy migration)
+npm run db:generate:prod
+npm run db:migrate:deploy
 ```
 
-4) สร้างตาราง + seed ข้อมูลเริ่มต้น
+### 4) รันแอป
 ```bash
-npm run db:migrate -- --name init
-npm run db:seed
-```
+# Development
+npm run dev   # ใช้ .env.development
 
-5) รันเซิร์ฟเวอร์
-```bash
-npm run dev
-# เปิด http://localhost:4000/health
+# Production (local)
+npm run start # ใช้ .env.production
 ```
-
-> Seed เริ่มต้น:  
-> - Roles: `admin`, `staff`  
-> - Departments: `HR`, `ACC`  
-> - Admin user: `admin@example.com` / `Admin@12345` (กรุณาเปลี่ยนทันที)
 
 ---
 
-## 📦 NPM Scripts
+## 📚 API Docs (Swagger)
 
-```json
-{
-  "dev": "nodemon --watch src --exec node src/index.js",
-  "start": "node src/index.js",
-  "prisma:init": "npx prisma init",
-  "db:migrate": "npx prisma migrate dev",
-  "db:seed": "node prisma/seed.js",
-  "prisma:studio": "npx prisma studio"
+- UI: **http://localhost:4000/api/docs**
+- Spec (JSON): **http://localhost:4000/api/openapi.json**
+
+ไฟล์สเปคอยู่ที่ `src/docs/openapi.json` (แก้/เพิ่ม endpoint ได้ตามจริง)
+
+---
+
+## 🔐 RBAC (บทบาทและสิทธิ์)
+
+- **admin** — ทำได้ทุกอย่าง (read/write/delete/approve)
+- **user** — เขียน/แก้ไขได้เฉพาะ **ของตนเอง**
+- **manager** — เขียน/แก้ไขได้เฉพาะ **ทรัพยากรที่อยู่ในแผนกตน**
+- **MD** — ต้องสังกัดแผนก **MGT**; **อ่าน+อนุมัติได้** ทั่วระบบ แต่ **ห้ามเขียน/ลบ**
+
+บังคับใช้ผ่าน `middlewares/policy.js` และตัวช่วยจาก `utils/roles.js`:
+- `requireAuth`, `requireMe`
+- `canWriteUser`, `canWriteUserDepartment`, `canWriteEval`
+- `anyOf(allowAdmin, allowMDApproveOnly)` สำหรับเส้นทางอนุมัติ
+
+---
+
+## 🧭 Base Routes
+
+- Health: `GET /api/health`
+- Auth: `/api/auth/*` (register, login, refresh, logout, me, change-password)
+- Users: `/api/users/*`
+- User Departments: `/api/user-departments/*`
+- Departments: `/api/departments/*`
+- Organizations: `/api/organizations/*`
+- Roles: `/api/roles/*`
+- Eval Cycles: `/api/eval-cycles/*`
+- Evals: `/api/evals/*`
+- Contacts: `/api/contacts/*`
+- Files: `/api/files/*`
+- Profile: `/api/profile/me`
+
+> Prefix `/api` ถูกกำหนดด้วย `API_PREFIX` (ค่าเริ่มต้น `api`)
+
+---
+
+## 🗂 โครงสร้างโปรเจกต์
+
+```
+src/
+  app.js
+  server.js
+  prisma.js
+  config/
+    env.js
+  middlewares/
+    auth.js
+    upload.js
+    validate.js
+    policy.js
+    error.js
+  utils/
+    roles.js
+    pagination.js
+    asyncHandler.js
+    appError.js
+  lib/
+    tokens.js
+    mailer.js
+    score.js
+    errors.js
+    paths.js
+    prisma-error.js
+  controllers/
+    *.controller.js
+  services/
+    *.service.js
+  routes/
+    *.routes.js
+    index.js
+  docs/
+    openapi.json
+prisma/
+  schema.prisma
+  seed.js
+```
+
+---
+
+## 📦 NPM Scripts ที่ใช้บ่อย
+
+```jsonc
+"scripts": {
+  "dev": "dotenv -e .env.development -- nodemon src/server.js",
+  "start": "dotenv -e .env.production  -- node src/server.js",
+
+  "prisma:init": "prisma init",
+  "prisma:studio:dev":  "dotenv -e .env.development -- prisma studio",
+  "prisma:studio:prod": "dotenv -e .env.production  -- prisma studio",
+
+  "db:generate:dev":   "dotenv -e .env.development -- prisma generate",
+  "db:generate:prod":  "dotenv -e .env.production  -- prisma generate",
+  "db:migrate:dev":    "dotenv -e .env.development -- prisma migrate dev",
+  "db:migrate:deploy": "dotenv -e .env.production  -- prisma migrate deploy",
+  "db:push:dev":       "dotenv -e .env.development -- prisma db push",
+  "db:reset:dev":      "dotenv -e .env.development -- prisma migrate reset --force",
+  "db:seed:dev":       "dotenv -e .env.development -- node prisma/seed.js",
+
+  "test": "vitest",
+  "test:run": "vitest run"
 }
 ```
 
 ---
 
-## 🗂️ โครงสร้างโปรเจกต์ (ย่อ)
+## 🧪 ตัวอย่าง cURL
 
-```
-prisma/
-  schema.prisma
-  seed.js
-src/
-  index.js
-  prisma.js
-  config/paths.js
-  middlewares/
-    auth.js
-    upload.js
-  routes/
-    health.js
-    auth.js
-    profile.js
-    users.js
-    roles.js
-    departments.js
-.env
-docker-compose.yml
-README.md
-```
-
----
-
-## 🗃️ สคีมาคร่าว ๆ
-
-- **Role**: `id`, `name (unique)`, `labelTh`, `labelEn`
-- **Department**: `id`, `code (unique)`, `nameTh`, `nameEn`
-- **User**: `id`, `email (unique)`, `passwordHash`, `first/last (Th/En)`, `roleId`, `departmentId`, `avatarPath?`, `deletedAt?`
-
-Soft delete ใช้ `deletedAt: DateTime?` (เป็น `null` เมื่อยังไม่ถูกลบ)
-
----
-
-## 🔐 Authentication & Authorization
-
-- **Cookie Session** (HTTPOnly) ด้วย `cookie-session`
-  - อายุ 1 วัน หรือ 7 วัน หาก `remember: true` ตอน `POST /auth/login`
-- **Guard**
-  - `requireAuth` → ต้องล็อกอิน
-  - `requireRole('admin')` → สิทธิ์เฉพาะแอดมิน
-
----
-
-## 📑 API Reference (ย่อ)
-
-### Health
-| Method | Path        | Auth | Description |
-|-------:|-------------|------|-------------|
-| GET    | `/health`   | -    | ตรวจสุขภาพระบบ + ping DB |
-
-### Auth
-| Method | Path                   | Body (สำคัญ)                              | Description |
-|-------:|------------------------|--------------------------------------------|-------------|
-| POST   | `/auth/register`       | `email`, `password`, `departmentId`, names | สมัครสมาชิกใหม่ (role = `staff`) |
-| POST   | `/auth/login`          | `email`, `password`, `remember?`           | ล็อกอิน, เซ็ตคุกกี้ `sid` |
-| POST   | `/auth/logout`         | -                                          | ล็อกเอาต์ ลบคุกกี้ |
-| GET    | `/auth/me`             | -                                          | ตรวจสถานะล็อกอิน |
-| POST   | `/auth/change-password`| `currentPassword`, `newPassword`           | ผู้ใช้เปลี่ยนรหัสผ่าน (ต้องล็อกอิน) |
-
-### Users
-| Method | Path                                 | Auth                | Description |
-|-------:|--------------------------------------|---------------------|-------------|
-| GET    | `/api/users`                          | requireAuth         | List + ค้นหา/กรอง/แบ่งหน้า/เรียง |
-| GET    | `/api/users/:id`                      | requireAuth         | อ่านทีละคน |
-| POST   | `/api/users`                          | requireRole('admin')| สร้างผู้ใช้ (รับ `password` หรือ `passwordHash`) |
-| PATCH  | `/api/users/:id`                      | requireAuth         | แก้ไขข้อมูล (admin: ได้ทุกฟิลด์ยกเว้นรหัสผ่าน / non-admin: แก้ของตัวเองเฉพาะชื่อ) |
-| POST   | `/api/users/:id/reset-password`       | requireRole('admin')| รีเซ็ตรหัสผ่านให้ผู้ใช้ |
-| DELETE | `/api/users/:id`                      | requireAuth         | **Soft delete** (ตัวเอง หรือ admin) |
-| DELETE | `/api/users/:id?hard=1`               | requireRole('admin')| **Hard delete** (admin เท่านั้น; ไม่ให้ลบตัวเอง) |
-| POST   | `/api/users/:id/restore`              | requireRole('admin')| คืนค่าจาก soft delete |
-
-**คิวรีพารามิเตอร์ของ list**:  
-`q`, `roleId`, `departmentId`, `includeDeleted`, `page`, `limit`, `sortBy`, `sort`
-
-### Roles
-| Method | Path                 | Auth                | Description |
-|-------:|----------------------|---------------------|-------------|
-| GET    | `/api/roles`         | requireAuth         | List (ค้นหา/แบ่งหน้า/เรียง) |
-| GET    | `/api/roles/:id`     | requireAuth         | อ่านทีละรายการ |
-| POST   | `/api/roles`         | requireRole('admin')| สร้าง (name ต้อง unique) |
-| PATCH  | `/api/roles/:id`     | requireRole('admin')| แก้ไข |
-| DELETE | `/api/roles/:id`     | requireRole('admin')| ลบ (บล็อกถ้ามี user อ้างอิง) |
-
-### Departments
-| Method | Path                        | Auth                | Description |
-|-------:|-----------------------------|---------------------|-------------|
-| GET    | `/api/departments`          | requireAuth         | List (ค้นหา/แบ่งหน้า/เรียง) |
-| GET    | `/api/departments/:id`      | requireAuth         | อ่านทีละรายการ |
-| POST   | `/api/departments`          | requireRole('admin')| สร้าง (code ต้อง unique) |
-| PATCH  | `/api/departments/:id`      | requireRole('admin')| แก้ไข |
-| DELETE | `/api/departments/:id`      | requireRole('admin')| ลบ (บล็อกถ้ามี user อ้างอิง) |
-
-### Profile / Avatar
-| Method | Path                                  | Auth        | Body                         | Description |
-|-------:|---------------------------------------|-------------|------------------------------|-------------|
-| PUT    | `/profile/avatar`                     | requireAuth | `avatar` (form-data file)    | อัปโหลดรูป → บีบ/แปลงเป็น `.webp` เก็บนอกโปรเจกต์ |
-| GET    | `/profile/files/user/avatar/:userId`  | -           | -                            | (ค่าเริ่มต้น) เสิร์ฟ avatar แบบ Dynamic Route |
-
-> **หากต้องการเปิดเสิร์ฟแบบ Static ทั้งโฟลเดอร์**  
-> ใน `src/index.js` เพิ่ม:
-> ```js
-> import { UPLOAD_ROOT } from './config/paths.js';
-> app.use('/files', express.static(UPLOAD_ROOT));
-> ```
-> แล้วจะเข้าถึงไฟล์ได้ที่ `/files/<relative-path>` เช่น `/files/user/avatar/12/avatar.webp`.
-
----
-
-## 🧪 ตัวอย่างทดสอบ (cURL)
-
-**Register**
+### Login
 ```bash
-curl -i -X POST http://localhost:4000/auth/register   -H "Content-Type: application/json"   -d '{"email":"user1@example.com","password":"P@ssw0rd123","firstNameTh":"สมชาย","lastNameTh":"ดีงาม","departmentId":1}'
+curl -X POST http://localhost:4000/api/auth/login   -H "Content-Type: application/json"   -d '{"email":"admin@emp.com","password":"secret"}'
 ```
 
-**Login (จำฉันไว้ 7 วัน)**
+### Get My Session
 ```bash
-curl -i -X POST http://localhost:4000/auth/login   -H "Content-Type: application/json"   -d '{"email":"admin@example.com","password":"Admin@12345","remember":true}'
+curl http://localhost:4000/api/auth/me   -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
-**Upload Avatar**
+### Create User (สิทธิขึ้นกับ RBAC)
 ```bash
-curl -i -X PUT http://localhost:4000/profile/avatar   --cookie "sid=<คุกกี้จาก /auth/login>"   -F "avatar=@/path/to/avatar.jpg"
+curl -X POST http://localhost:4000/api/users   -H "Authorization: Bearer <ACCESS_TOKEN>"   -H "Content-Type: application/json"   -d '{"email":"u@emp.com","password":"1234","name":"U One","roleId":2}'
 ```
 
-**Soft Delete (ลบตัวเอง/หรือ admin ลบผู้ใช้)**
+### Upload Avatar
 ```bash
-curl -i -X DELETE http://localhost:4000/api/users/2   --cookie "sid=<คุกกี้>"
-```
-
-**Hard Delete (admin เท่านั้น)**
-```bash
-curl -i -X DELETE "http://localhost:4000/api/users/2?hard=1"   --cookie "sid=<คุกกี้ admin>"
-```
-
-**Restore (admin)**
-```bash
-curl -i -X POST http://localhost:4000/api/users/2/restore   --cookie "sid=<คุกกี้ admin>"
+curl -X POST http://localhost:4000/api/files/avatar   -H "Authorization: Bearer <ACCESS_TOKEN>"   -F "file=@./avatar.png"
 ```
 
 ---
 
-## 🛠️ ทิป & ทราบไว้
-- **CORS + Cookie**: ฝั่ง frontend ต้องตั้ง `fetch(..., { credentials: "include" })` และเซิร์ฟเวอร์ตั้ง `cors({ origin: <frontend-origin>, credentials: true })`
-- **Prisma Errors**
-  - `P1001` ต่อ DB ไม่ได้ → ตรวจ `DATABASE_URL`, บริการ MySQL พร้อมหรือยัง
-  - `P2002` unique constraint ล้มเหลว (เช่น email/name/code ซ้ำ)
-- **Sharp บน Windows**: หากมีปัญหา ให้ลบ `node_modules` แล้ว `npm install` ใหม่
-- **ความปลอดภัย**
-  - ใช้ `SESSION_SECRET` ยาว/สุ่มจริง
-  - เปิด `secure: true` เมื่ออยู่หลัง HTTPS/โปรดักชัน
-  - ต้องการ revoke session / หลายอินสแตนซ์ → ใช้ session store (เช่น Redis)
+## 🧯 Troubleshooting
+
+- **`ReferenceError: path is not defined`**  
+  เพิ่มใน `app.js`:
+  ```js
+  import path from "node:path";
+  import fs from "node:fs";
+  ```
+
+- **Prisma ไม่พบ Client / schema เปลี่ยนแล้วไม่อัปเดต**  
+  รัน:
+  ```bash
+  npm run db:generate:dev
+  npm run db:migrate:dev
+  ```
+
+- **ไฟล์อัปโหลดใหญ่เกินไป**  
+  ปรับ `limits.fileSize` ใน `middlewares/upload.js`
+
+- **MD เขียน/ลบไม่ได้**  
+  เป็นพฤติกรรมตาม RBAC — MD อ่าน+อนุมัติ (ผ่าน `allowMDApproveOnly`) เท่านั้น
 
 ---
 
-## 🗺️ Roadmap / TODO (แนะนำ)
-- รหัสพนักงานอัตโนมัติ: `YY` (พ.ศ. 2 หลัก) + ลำดับสมัครภายในปี (+ `C` สำหรับสัญญาชั่วคราว)
-- ระบบสิทธิ์ละเอียดขึ้น (เช่น HR manager / QMR ฯลฯ)
-- Export รายงาน / Audit logs
-- Swagger / OpenAPI
-- Rate limiting / Brute-force protection
-
----
-
-## 📜 License
-MIT
+## 📄 License
+ISC

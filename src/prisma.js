@@ -1,4 +1,3 @@
-// src/prisma.js
 import { PrismaClient } from "@prisma/client";
 import { computeScores } from "./lib/score.js";
 
