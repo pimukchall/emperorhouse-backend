@@ -10,10 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// =====================================
-// Enums
-// =====================================
-
 enum Gender {
   MALE
   FEMALE
@@ -32,9 +28,6 @@ enum ContractType {
   PROBATION
 }
 
-/**
- * ใช้เฉพาะ 5 ระดับนี้
- */
 enum PositionLevel {
   STAF
   SVR
@@ -68,15 +61,11 @@ enum EvalStatus {
   REJECTED
 }
 
-// =====================================
-// Masters
-// =====================================
-
 model Role {
   id      Int    @id @default(autoincrement())
-  name    String @unique // 'admin' | 'user'
-  labelTh String
-  labelEn String
+  name    String @unique @db.VarChar(50)
+  labelTh String @db.VarChar(120)
+  labelEn String @db.VarChar(120)
   users   User[]
 
   createdAt DateTime @default(now())
@@ -85,13 +74,12 @@ model Role {
 
 model Department {
   id     Int    @id @default(autoincrement())
-  code   String @unique // e.g. 'QMS', 'HR', 'MK'
-  nameTh String
-  nameEn String
+  code   String @unique @db.VarChar(32)
+  nameTh String @db.VarChar(120)
+  nameEn String @db.VarChar(120)
 
   userDepartments UserDepartment[]
 
-  // reverse relations for logs
   fromPositionChangeLogs PositionChangeLog[] @relation("pcl_fromDept")
   toPositionChangeLogs   PositionChangeLog[] @relation("pcl_toDept")
 
@@ -101,9 +89,9 @@ model Department {
 
 model Organization {
   id        Int       @id @default(autoincrement())
-  code      String    @unique
-  nameTh    String
-  nameEn    String
+  code      String    @unique @db.VarChar(32)
+  nameTh    String    @db.VarChar(120)
+  nameEn    String    @db.VarChar(120)
   deletedAt DateTime?
 
   users User[]
@@ -112,50 +100,38 @@ model Organization {
   updatedAt DateTime @updatedAt
 }
 
-// =====================================
-// User / Employee Master
-// =====================================
-
 model User {
   id Int @id @default(autoincrement())
 
-  // Login identity
-  name         String @default("")
-  email        String @unique // NOTE: คง unique เดี่ยวเพื่อเลี่ยงปัญหา composite+NULL บน MySQL
-  passwordHash String
+  name         String  @default("") @db.VarChar(160)
+  email        String  @unique @db.VarChar(160)
+  passwordHash String  @db.VarChar(255)
 
-  // Names
-  firstNameTh String
-  lastNameTh  String
-  firstNameEn String
-  lastNameEn  String
+  firstNameTh String @db.VarChar(120)
+  lastNameTh  String @db.VarChar(120)
+  firstNameEn String @db.VarChar(120)
+  lastNameEn  String @db.VarChar(120)
 
-  // Role (one user -> one role)
   roleId Int
-  role   Role @relation(fields: [roleId], references: [id])
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
-  // Organization / Work location (optional)
   orgId        Int?
-  organization Organization? @relation(fields: [orgId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
-  // Many departments (position per department)
   userDepartments UserDepartment[]
 
-  // Primary department (1-1)
   primaryUserDeptId Int?            @unique
-  primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id])
+  primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id], onDelete: SetNull)
 
-  // Position change logs (as subject & actor) — ฝั่งตรงข้ามของ PositionChangeLog
   positionChangeLogs      PositionChangeLog[] @relation("pcl_user")
   actedPositionChangeLogs PositionChangeLog[] @relation("pcl_actor")
 
-  evaluations Evaluation[] @relation("EvalOwner")
-  manageEvals Evaluation[] @relation("EvalManager")
-  mdEvals     Evaluation[] @relation("EvalMD")
+  evaluations  Evaluation[] @relation("EvalOwner")
+  manageEvals  Evaluation[] @relation("EvalManager")
+  mdEvals      Evaluation[] @relation("EvalMD")
   createdEvals Evaluation[] @relation("EvalCreator")
 
-  // Employee master fields
-  employeeCode String?       @unique
+  employeeCode String?       @unique @db.VarChar(32)
   employeeType EmployeeType?
   contractType ContractType?
 
@@ -166,19 +142,17 @@ model User {
   gender           Gender?
 
   signature  Bytes?
-  avatarPath String?
+  avatarPath String? @db.VarChar(255)
 
-  // Relations
   passwordResets PasswordReset[]
 
-  // Soft delete & timestamps
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  // indexes
   @@index([roleId])
   @@index([orgId])
+  @@index([email, deletedAt])
   @@index([employeeType])
   @@index([contractType])
   @@index([startDate])
@@ -186,35 +160,27 @@ model User {
   @@index([deletedAt])
 }
 
-// =====================================
-// User ↔ Department (historized)
-// =====================================
-
 model UserDepartment {
   id Int @id @default(autoincrement())
 
   userId Int
-  user   User @relation(fields: [userId], references: [id])
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   departmentId Int
-  department   Department @relation(fields: [departmentId], references: [id])
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
 
   positionLevel PositionLevel
-  positionName  String? // ชื่อตำแหน่งจริง เช่น 'QMR', 'Project Manager'
+  positionName  String? @db.VarChar(120)
 
   startedAt DateTime  @default(now())
-  endedAt   DateTime? // null = active
+  endedAt   DateTime?
+  isActive  Boolean   @default(true)
 
-  // คุมความเป็น active ชัดเจน (แก้ปัญหา NULL ใน unique composite ของ MySQL)
-  isActive Boolean @default(true)
-
-  // backlink for primary
   primaryOfUser User? @relation("primary_of_user")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // อนุญาต history หลายระเบียน แต่ active ได้แค่ 1 ระเบียนต่อ user+department
   @@unique([userId, departmentId, isActive])
   @@index([userId, departmentId])
   @@index([departmentId, positionLevel])
@@ -222,31 +188,27 @@ model UserDepartment {
   @@index([endedAt])
 }
 
-// =====================================
-// Position change audit log
-// =====================================
-
 model PositionChangeLog {
   id   Int                @id @default(autoincrement())
   kind PositionChangeKind
 
   userId Int
-  user   User @relation("pcl_user", fields: [userId], references: [id])
+  user   User @relation("pcl_user", fields: [userId], references: [id], onDelete: Cascade)
 
   fromDepartmentId Int?
-  fromDepartment   Department? @relation("pcl_fromDept", fields: [fromDepartmentId], references: [id])
+  fromDepartment   Department? @relation("pcl_fromDept", fields: [fromDepartmentId], references: [id], onDelete: SetNull)
 
   toDepartmentId Int?
-  toDepartment   Department? @relation("pcl_toDept", fields: [toDepartmentId], references: [id])
+  toDepartment   Department? @relation("pcl_toDept", fields: [toDepartmentId], references: [id], onDelete: SetNull)
 
   actorId Int?
-  actor   User? @relation("pcl_actor", fields: [actorId], references: [id])
+  actor   User? @relation("pcl_actor", fields: [actorId], references: [id], onDelete: SetNull)
 
   fromLevel PositionLevel?
   toLevel   PositionLevel?
 
-  fromName String?
-  toName   String?
+  fromName String? @db.VarChar(120)
+  toName   String? @db.VarChar(120)
 
   effectiveDate DateTime
   reason        String?
@@ -259,14 +221,10 @@ model PositionChangeLog {
   @@index([toDepartmentId])
 }
 
-// =====================================
-// Password Reset
-// =====================================
-
 model PasswordReset {
   id        Int       @id @default(autoincrement())
   userId    Int
-  token     String    @unique
+  token     String    @unique @db.VarChar(255)
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
@@ -276,10 +234,6 @@ model PasswordReset {
   @@index([userId])
   @@index([token])
 }
-
-// =====================================
-// Contact / Public Form
-// =====================================
 
 model ContactMessage {
   id        Int      @id @default(autoincrement())
@@ -294,13 +248,9 @@ model ContactMessage {
   @@index([email])
 }
 
-// =====================================
-// CYCLES (รอบประเมิน)
-// =====================================
-
 model EvalCycle {
   id          Int       @id @default(autoincrement())
-  code        String    @unique // เช่น "2025_MID_YEAR"
+  code        String    @unique @db.VarChar(64)
   year        Int
   stage       EvalStage
   openAt      DateTime
@@ -313,33 +263,25 @@ model EvalCycle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([year, stage]) // ช่วย query รายงานตามปี/รอบ
+  @@index([year, stage])
+  @@index([isActive])
 }
-
-// =====================================
-// EVALUATION (เก็บคะแนนรายข้อในตารางเดียว)
-// =====================================
-
 model Evaluation {
   id Int @id @default(autoincrement())
 
-  // ผู้ถูกประเมิน
   ownerId Int
-  owner   User @relation("EvalOwner", fields: [ownerId], references: [id])
+  owner   User @relation("EvalOwner", fields: [ownerId], references: [id], onDelete: Restrict)
 
-  // ผู้ยื่น/ผู้สร้างแบบ (กรณี self-assessment จะ = ownerId)
   createdById Int
-  createdBy   User @relation("EvalCreator", fields: [createdById], references: [id])
+  createdBy   User @relation("EvalCreator", fields: [createdById], references: [id], onDelete: Restrict)
 
-  // ผู้อนุมัติ
   managerId Int?
-  manager   User? @relation("EvalManager", fields: [managerId], references: [id])
+  manager   User? @relation("EvalManager", fields: [managerId], references: [id], onDelete: SetNull)
   mdId      Int?
-  md        User? @relation("EvalMD", fields: [mdId], references: [id])
+  md        User? @relation("EvalMD", fields: [mdId], references: [id], onDelete: SetNull)
 
-  // รอบ/ประเภท/สถานะ
   cycleId Int
-  cycle   EvalCycle  @relation(fields: [cycleId], references: [id])
+  cycle   EvalCycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   type    EvalType
   stage   EvalStage
   status  EvalStatus @default(DRAFT)
@@ -350,69 +292,59 @@ model Evaluation {
   completedAt DateTime?
   rejectedAt  DateTime?
 
-  // ============= หมวด 1: ด้านการปฏิบัติงาน (เต็มรวม 40) =============
-  // ทุกข้อกรอก 0..10, คิดน้ำหนัก: 1.1–1.3 x2, 1.4–1.5 x1
-  s1_responsibility  Float? // 1.1 ความรับผิดชอบ /10
-  s1_development     Float? // 1.2 การพัฒนา /10
-  s1_workload        Float? // 1.3 ปริมาณงาน /10
-  s1_qualityStandard Float? // 1.4 มาตรฐานงาน /10
-  s1_coordination    Float? // 1.5 การประสานงาน /10
+  s1_responsibility  Float?
+  s1_development     Float?
+  s1_workload        Float?
+  s1_qualityStandard Float?
+  s1_coordination    Float? 
 
-  // ============= หมวด 2: ผลของงาน =============
-  // OPERATIONAL: ทุกข้อกรอก 0..10, น้ำหนัก x2 รวมเต็ม 30
-  // SUPERVISOR : 2.1–2.2 กรอก 0..10 (x2), 2.3–2.4 กรอก 0..5 (x1) รวมเต็ม 40
-  s2_valueOfWork          Float? // 2.1
-  s2_customerSatisfaction Float? // 2.2
-  s2_costEffectiveness    Float? // 2.3 (OP: /10, SV: /5)
-  s2_timeliness           Float? // 2.4 (OP: /10, SV: /5)
+  s2_valueOfWork          Float? 
+  s2_customerSatisfaction Float? 
+  s2_costEffectiveness    Float? 
+  s2_timeliness           Float?
 
-  // ============= หมวด 3: คุณสมบัติฯ =============
-  // ทุกข้อกรอก 0..5 (12 ข้อ)
-  s3_jobKnowledge         Float? // 3.1
-  s3_attitude             Float? // 3.2
-  s3_contextUnderstanding Float? // 3.3
-  s3_systematicThinking   Float? // 3.4
-  s3_decisionMaking       Float? // 3.5
-  s3_adaptability         Float? // 3.6
-  s3_leadership           Float? // 3.7
-  s3_verbalComm           Float? // 3.8
-  s3_writtenComm          Float? // 3.9
-  s3_selflessness         Float? // 3.10
-  s3_ruleCompliance       Float? // 3.11
-  s3_selfReliance         Float? // 3.12
+  s3_jobKnowledge         Float?
+  s3_attitude             Float?
+  s3_contextUnderstanding Float?
+  s3_systematicThinking   Float?
+  s3_decisionMaking       Float?
+  s3_adaptability         Float?
+  s3_leadership           Float?
+  s3_verbalComm           Float?
+  s3_writtenComm          Float?
+  s3_selflessness         Float?
+  s3_ruleCompliance       Float?
+  s3_selfReliance         Float?
 
-  // ============= ช่องบรรยาย =============
-  t_potential           String? // ศักยภาพ
-  t_strengthsWeaknesses String? // จุดเด่น/จุดด้อย
-  t_trainingNeeds       String? // หัวข้ออบรมเพิ่มเติม
+  t_potential           String?
+  t_strengthsWeaknesses String?
+  t_trainingNeeds       String?
 
-  // ============= รวมคะแนน (cache สำหรับรายงาน) =============
-  scorePerf   Float? // หมวด 1 คำนวณตามน้ำหนัก -> เต็ม 40
-  scoreResult Float? // หมวด 2 -> เต็ม 30 (OP) / 40 (SV)
-  scoreComp   Float? // หมวด 3 -> เต็ม 30 (OP) / 20 (SV)
-  scoreTotal  Float? // รวม 100
+  scorePerf   Float?
+  scoreResult Float?
+  scoreComp   Float?
+  scoreTotal  Float?
 
-  // ============= ความเห็น/ลายเซ็น (ของ "ผู้ยื่น") =============
   submitterComment   String?
   submitterSignedAt  DateTime?
-  submitterSignature Bytes?   // ลายเซ็นผู้ยื่น (owner เองใน flow ปกติ)
+  submitterSignature Bytes?
 
-  // ความเห็น/ลายเซ็นของผู้อนุมัติ
-  managerComment     String?
-  managerSignedAt    DateTime?
-  managerSignature   Bytes?
+  managerComment   String?
+  managerSignedAt  DateTime?
+  managerSignature Bytes?
 
-  mdComment          String?
-  mdSignedAt         DateTime?
-  mdSignature        Bytes?
+  mdComment   String?
+  mdSignedAt  DateTime?
+  mdSignature Bytes?
 
-  hrNote          String?
-  hrReceivedAt    DateTime?
+  hrNote       String?
+  hrReceivedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([cycleId, ownerId])
+  @@index([ownerId, status])
   @@index([createdById])
   @@index([stage])
   @@index([status])

@@ -25,14 +25,26 @@ async function ensureMasters() {
     { code: "CS", nameTh: "บริการลูกค้า", nameEn: "Customer Service" },
     { code: "AD", nameTh: "สถาปัตยกรรม", nameEn: "Architectural Design" },
     { code: "DD", nameTh: "ออกแบบ", nameEn: "Design Development" },
-    { code: "CM", nameTh: "บริหารงานก่อสร้าง", nameEn: "Construction Management" },
+    {
+      code: "CM",
+      nameTh: "บริหารงานก่อสร้าง",
+      nameEn: "Construction Management",
+    },
     { code: "CO", nameTh: "การดำเนินงานลูกค้า", nameEn: "Customer Operations" },
     { code: "QS", nameTh: "ประเมินราคา", nameEn: "Quantity Surveyor" },
     { code: "PU", nameTh: "จัดซื้อ", nameEn: "Procurement" },
     { code: "AC", nameTh: "บัญชี", nameEn: "Accounts" },
     { code: "HR", nameTh: "ทรัพยากรบุคคล", nameEn: "Human Resources" },
-    { code: "IT", nameTh: "เทคโนโลยีสารสนเทศ", nameEn: "Information Technology" },
-    { code: "QMS", nameTh: "ระบบบริหารคุณภาพ", nameEn: "Quality Management System" },
+    {
+      code: "IT",
+      nameTh: "เทคโนโลยีสารสนเทศ",
+      nameEn: "Information Technology",
+    },
+    {
+      code: "QMS",
+      nameTh: "ระบบบริหารคุณภาพ",
+      nameEn: "Quality Management System",
+    },
     { code: "MGT", nameTh: "ฝ่ายบริหาร", nameEn: "Management" },
     { code: "TAU", nameTh: "Taurus", nameEn: "Taurus" },
     { code: "LA", nameTh: "Leo Angelo", nameEn: "Leo Angelo" },
@@ -64,15 +76,43 @@ async function ensureMasters() {
     { code: "11000", nameTh: "ฝ่ายขาย", nameEn: "Sales" },
     { code: "11001", nameTh: "โกดังสายไหม", nameEn: "Warehouse Saimai" },
     { code: "20000", nameTh: "ฝ่ายการตลาด", nameEn: "Marketing" },
-    { code: "21000", nameTh: "ฝ่ายขาย และบริการลูกค้า (Acara)", nameEn: "Sales & Customer Service (Acara)", },
-    { code: "22000", nameTh: "ฝ่ายขาย และบริการลูกค้า (Emperor)", nameEn: "Sales & Customer Service (Emperor)", },
+    {
+      code: "21000",
+      nameTh: "ฝ่ายขาย และบริการลูกค้า (Acara)",
+      nameEn: "Sales & Customer Service (Acara)",
+    },
+    {
+      code: "22000",
+      nameTh: "ฝ่ายขาย และบริการลูกค้า (Emperor)",
+      nameEn: "Sales & Customer Service (Emperor)",
+    },
     { code: "30000", nameTh: "ฝ่ายทรัพยากรมนุษย์", nameEn: "Human Resources" },
-    { code: "41000", nameTh: "ฝ่ายออกแบบสถาปัตยกรรม", nameEn: "Architectural Design", },
-    { code: "42000", nameTh: "ฝ่ายออกแบบตกแต่งภายใน", nameEn: "Interior Design", },
-    { code: "50000", nameTh: "ฝ่ายบัญชีการเงิน", nameEn: "Accounting & Finance", },
-    { code: "60000", nameTh: "ฝ่ายเทคโนโลยีสารสนเทศ",nameEn: "Information Technology", },
+    {
+      code: "41000",
+      nameTh: "ฝ่ายออกแบบสถาปัตยกรรม",
+      nameEn: "Architectural Design",
+    },
+    {
+      code: "42000",
+      nameTh: "ฝ่ายออกแบบตกแต่งภายใน",
+      nameEn: "Interior Design",
+    },
+    {
+      code: "50000",
+      nameTh: "ฝ่ายบัญชีการเงิน",
+      nameEn: "Accounting & Finance",
+    },
+    {
+      code: "60000",
+      nameTh: "ฝ่ายเทคโนโลยีสารสนเทศ",
+      nameEn: "Information Technology",
+    },
     { code: "70000", nameTh: "ฝ่ายบริหารกฎหมาย", nameEn: "Legal Department" },
-    { code: "80000", nameTh: "ฝ่ายประเมินราคาและจัดซื้อ", nameEn: "Procurement & Estimation", },
+    {
+      code: "80000",
+      nameTh: "ฝ่ายประเมินราคาและจัดซื้อ",
+      nameEn: "Procurement & Estimation",
+    },
     { code: "Leo10000", nameTh: "ฝ่ายโชว์รูม", nameEn: "Showroom" },
   ];
   await Promise.all(
@@ -84,6 +124,21 @@ async function ensureMasters() {
       })
     )
   );
+
+  const year = new Date().getFullYear();
+  await prisma.evalCycle.upsert({
+    where: { code: `${year}_MID_YEAR` },
+    update: {},
+    create: {
+      code: `${year}_MID_YEAR`,
+      year,
+      stage: "MID_YEAR",
+      openAt: new Date(Date.UTC(year, 0, 1)),
+      closeAt: new Date(Date.UTC(year, 5, 30)),
+      isActive: true,
+      isMandatory: true,
+    },
+  });
 }
 
 async function ensureUserWithActiveDept({
@@ -185,6 +240,28 @@ async function seedAdminAndQMR() {
     positionLevel: "MANAGER",
     positionName: "QMR",
   });
+
+  const itDept = await prisma.department.findUnique({ where: { code: "IT" } });
+await ensureUserWithActiveDept({
+  email: "staff.it@example.com",
+  data: {
+    email: "staff.it@example.com",
+    passwordHash: await bcrypt.hash("Staff@12345", 10),
+    firstNameTh: "พนักงาน",
+    lastNameTh: "ไอที",
+    firstNameEn: "IT",
+    lastNameEn: "Staff",
+    roleId: userRole.id,
+    orgId: orgHR.id,
+    employeeCode: "9901",
+    employeeType: "MONTHLY",
+    contractType: "PERMANENT",
+    startDate: new Date(),
+  },
+  deptId: itDept.id,
+  positionLevel: "STAF",
+  positionName: "Developer",
+});
 
   console.log("✅ Seeded admin & QMR");
 }
