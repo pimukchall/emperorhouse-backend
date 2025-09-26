@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import helmet from "helmet";
 import { config as dotenvConfig } from "dotenv";
+import { env } from "./config/env.js";
 
 // ===== env (.env.development / .env.production)
 const NODE_ENV = process.env.NODE_ENV ?? "development";
@@ -91,8 +92,9 @@ app.use((err, _req, res, _next) => {
 });
 
 // ===== start
-app.listen(PORT, () => {
-  console.log(
-    `API ready on http://localhost:${PORT} [env=${NODE_ENV}] (all under /api)`
-  );
+app.listen(env.PORT, () => {
+  console.log(`Server started on port ${env.PORT} (${NODE_ENV})`);
+  if (!IS_PROD) {
+    console.log(`- Frontend URL: ${env.FRONTEND_BASE_URL}`);
+  }
 });
