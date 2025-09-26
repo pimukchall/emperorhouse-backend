@@ -7,14 +7,18 @@ import {
   deleteOrganizationController,
   restoreOrganizationController,
 } from "../controllers/organizations.controller.js";
+import { requireAuth } from "../middlewares/auth.js";
+import { anyOf, allowAdmin } from "../middlewares/policy.js";
 
-const router = Router();
+const r = Router();
+r.use(requireAuth);
 
-router.get("/", listOrganizationsController);
-router.get("/:id", getOrganizationController);
-router.post("/", createOrganizationController);
-router.put("/:id", updateOrganizationController);
-router.delete("/:id", deleteOrganizationController);
-router.post("/:id/restore", restoreOrganizationController);
+r.get("/", ...listOrganizationsController);
+r.get("/:id", ...getOrganizationController);
 
-export default router;
+r.post("/", anyOf(allowAdmin), ...createOrganizationController);
+r.patch("/:id", anyOf(allowAdmin), ...updateOrganizationController);
+r.delete("/:id", anyOf(allowAdmin), ...deleteOrganizationController);
+r.post("/:id/restore", anyOf(allowAdmin), ...restoreOrganizationController);
+
+export default r;

@@ -1,20 +1,37 @@
+import { prisma as defaultPrisma } from "../prisma.js";
 import { sendMail } from "../lib/mailer.js";
+import { env } from "../config/env.js";
+import { AppError } from "../utils/appError.js";
 
-// ---------- CREATE ----------
-export async function submitContactService({ prisma, body }) {
+function esc(s = "") {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+function nl2br(s = "") {
+  return String(s).replace(/\n/g, "<br>");
+}
+
+// CREATE
+export async function submitContactService({ prisma = defaultPrisma, body }) {
   const { name, email, phone, subject, message } = body || {};
   const nm = String(name ?? "").trim();
-  const em = String(email ?? "").trim().toLowerCase();
+  const em = String(email ?? "")
+    .trim()
+    .toLowerCase();
   const sj = String(subject ?? "").trim();
   const msg = String(message ?? "").trim();
-  if (!nm || !em || !sj || !msg) throw new Error("ข้อมูลไม่ครบถ้วน");
+  if (!nm || !em || !sj || !msg) throw AppError.badRequest("ข้อมูลไม่ครบถ้วน");
 
   const saved = await prisma.contactMessage.create({
     data: {
-      name: nm.slice(0,120),
-      email: em.slice(0,160),
-      phone: phone ? String(phone).slice(0,32) : null,
-      subject: sj.slice(0,160),
+      name: nm.slice(0, 120),
+      email: em.slice(0, 160),
+      phone: phone ? String(phone).slice(0, 32) : null,
+      subject: sj.slice(0, 160),
       message: msg,
     },
     select: { id: true, createdAt: true },
@@ -26,23 +43,25 @@ export async function submitContactService({ prisma, body }) {
     (phone ? `<p><b>Phone:</b> ${esc(String(phone))}</p>` : "") +
     `<p><b>Subject:</b> ${esc(sj)}</p>` +
     `<p><b>Message:</b><br>${nl2br(esc(msg))}</p>` +
-    `<hr/><p><small>Ticket ID: #${saved.id} • ${new Date(saved.createdAt).toLocaleString()}</small></p>`;
-  
-    const textToTeam =
+    `<hr/><p><small>Ticket ID: #${saved.id} • ${new Date(
+      saved.createdAt
+    ).toLocaleString()}</small></p>`;
+
+  const textToTeam =
     `New Contact Request\n` +
-    `Name: ${name}\nEmail: ${email}\n` +
+    `Name: ${nm}\nEmail: ${em}\n` +
     (phone ? `Phone: ${phone}\n` : ``) +
-    `Subject: ${subject}\n\nMessage:\n${message}\n\n` +
+    `Subject: ${sj}\n\nMessage:\n${msg}\n\n` +
     `Ticket ID: #${saved.id} • ${new Date(saved.createdAt).toISOString()}\n`;
 
   const tasks = [];
-  const MAIL_TO = (process.env.MAIL_TO || process.env.SMTP_USER || "").trim();
+  const MAIL_TO = (env.MAIL_TO || env.SMTP_USER || "").trim();
 
   if (MAIL_TO) {
     tasks.push(
       sendMail({
         to: MAIL_TO,
-        subject: `[Contact] ${subject} (#${saved.id})`,
+        subject: `[Contact] ${sj} (#${saved.id})`,
         html: htmlToTeam,
         text: textToTeam,
       })
@@ -71,8 +90,15 @@ export async function submitContactService({ prisma, body }) {
   return { id: saved.id, createdAt: saved.createdAt, mailed };
 }
 
-// ---------- LIST ----------
-export async function listContactsService({ prisma, q, email, page, limit, sort }) {
+// LIST
+export async function listContactsService({
+  prisma = defaultPrisma,
+  q,
+  email,
+  page = 1,
+  limit = 20,
+  sort = "desc",
+}) {
   const where = {
     AND: [
       q
@@ -89,7 +115,9 @@ export async function listContactsService({ prisma, q, email, page, limit, sort 
     ],
   };
 
-  const orderBy = { createdAt: sort === "asc" ? "asc" : "desc" };
+  const orderBy = {
+    createdAt: String(sort).toLowerCase() === "asc" ? "asc" : "desc",
+  };
   const skip = (page - 1) * limit;
   const take = limit;
 
@@ -113,17 +141,4 @@ export async function listContactsService({ prisma, q, email, page, limit, sort 
   ]);
 
   return { items, total, page, limit };
-}
-
-// utils
-function esc(s) {
-  return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-function nl2br(s) {
-  return String(s || "").replace(/\n/g, "<br>");
 }

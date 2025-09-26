@@ -1,48 +1,127 @@
+import fs from "fs";
+import path from "path";
 import { prisma } from "../prisma.js";
+import { UPLOADS_BASE, AVATAR_BASE, SIGNATURE_BASE } from "../lib/paths.js";
 
-// ดึงโปรไฟล์ (อ่านอย่างเดียว)
-export async function getProfileService({ prisma: p = prisma, userId }) {
-  if (!userId) return null;
-  return p.user.findFirst({
-    where: { id: userId, deletedAt: null },
-    select: {
-      id: true, email: true, name: true, avatarPath: true,
-      employeeCode: true, employeeType: true, contractType: true,
-      startDate: true, probationEndDate: true, resignedAt: true, birthDate: true, gender: true,
-      organization: { select: { id: true, code: true, nameTh: true, nameEn: true } },
-      primaryUserDept: {
-        select: {
-          id: true, positionLevel: true, positionName: true,
-          department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
-        },
-      },
-    },
-  });
+function ensureDir(p) {
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+function relFromUploads(abs) {
+  return path.relative(UPLOADS_BASE, abs).replace(/\\/g, "/");
+}
+async function writePngToUserFolder({ buffer, baseDir, userId, filename }) {
+  const userDir = path.join(baseDir, String(userId));
+  ensureDir(userDir);
+  const abs = path.join(
+    userDir,
+    filename.endsWith(".png") ? filename : `${filename}.png`
+  );
+  await fs.promises.writeFile(abs, buffer);
+  return { abs, rel: relFromUploads(abs) };
 }
 
-// แก้ไขโปรไฟล์เฉพาะฟิลด์ที่อนุญาต
-export async function updateProfileService({ prisma: p = prisma, userId, data }) {
-  if (!userId) throw new Error("ไม่มีสิทธิ์เข้าใช้งาน");
-  const allow = [
-    "name","avatarPath",
-    "employeeCode","employeeType","contractType",
-    "startDate","probationEndDate","resignedAt","birthDate","gender",
-    "orgId"
-  ];
-  const payload = {};
-  for (const k of allow) if (k in data) payload[k] = data[k];
-  if ("orgId" in payload) payload.orgId = payload.orgId ? Number(payload.orgId) : null;
-  for (const k of ["startDate","probationEndDate","resignedAt","birthDate"]) {
-    if (k in payload) payload[k] = payload[k] ? new Date(payload[k]) : null;
+/* -------- Avatar -------- */
+export async function saveAvatarService({
+  userId,
+  fileBuffer,
+  maxSize = 2 * 1024 * 1024,
+}) {
+  if (!userId) {
+    const e = new Error("UNAUTHORIZED");
+    e.status = 401;
+    throw e;
   }
-  return p.user.update({ where: { id: userId }, data: payload });
+  if (!fileBuffer) {
+    const e = new Error("FILE_REQUIRED");
+    e.status = 400;
+    throw e;
+  }
+  if (fileBuffer.length > maxSize) {
+    const e = new Error("FILE_TOO_LARGE");
+    e.status = 400;
+    throw e;
+  }
+
+  const { rel } = await writePngToUserFolder({
+    buffer: fileBuffer,
+    baseDir: AVATAR_BASE,
+    userId,
+    filename: "avatar.png",
+  });
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { avatarPath: rel },
+  });
+  return { path: rel, url: `/profile/files/user/avatar/${userId}` };
 }
 
-// เซฟลายเซ็นจาก base64 → Bytes (ตัวเลือก)
-export async function saveSignatureService({ prisma: p = prisma, userId, signatureBase64 }) {
-  if (!userId) throw new Error("ไม่มีสิทธิ์เข้าใช้งาน");
-  if (!signatureBase64) throw new Error("ไม่มีข้อมูลลายเซ็น");
-  const base64 = signatureBase64.replace(/^data:\w+\/\w+;base64,/, "");
-  const buf = Buffer.from(base64, "base64");
-  return p.user.update({ where: { id: userId }, data: { signature: buf } });
+export async function getAvatarFilePathService({ userId }) {
+  const u = await prisma.user.findUnique({
+    where: { id: Number(userId) },
+    select: { avatarPath: true },
+  });
+  const rel = u?.avatarPath;
+  if (!rel) {
+    const e = new Error("NOT_FOUND");
+    e.status = 404;
+    throw e;
+  }
+  const abs = path.join(UPLOADS_BASE, rel);
+  if (!fs.existsSync(abs)) {
+    const e = new Error("NOT_FOUND");
+    e.status = 404;
+    throw e;
+  }
+  return abs;
+}
+
+/* -------- Signature -------- */
+export async function saveSignatureService({
+  userId,
+  fileBuffer,
+  maxSize = 1 * 1024 * 1024,
+}) {
+  if (!userId) {
+    const e = new Error("UNAUTHORIZED");
+    e.status = 401;
+    throw e;
+  }
+  if (!fileBuffer) {
+    const e = new Error("FILE_REQUIRED");
+    e.status = 400;
+    throw e;
+  }
+  if (fileBuffer.length > maxSize) {
+    const e = new Error("FILE_TOO_LARGE");
+    e.status = 400;
+    throw e;
+  }
+
+  await writePngToUserFolder({
+    buffer: fileBuffer,
+    baseDir: SIGNATURE_BASE,
+    userId,
+    filename: "signature.png",
+  });
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { signature: fileBuffer },
+  });
+  return { ok: true };
+}
+
+export async function getSignatureBytesService({ userId }) {
+  const u = await prisma.user.findUnique({
+    where: { id: Number(userId) },
+    select: { signature: true },
+  });
+  const bytes = u?.signature;
+  if (!bytes) {
+    const e = new Error("NOT_FOUND");
+    e.status = 404;
+    throw e;
+  }
+  return Buffer.from(bytes);
 }

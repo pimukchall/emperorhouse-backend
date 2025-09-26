@@ -5,24 +5,24 @@ import {
   createUserController,
   updateUserController,
   softDeleteUserController,
-  setPrimaryDepartmentController,
   restoreUserController,
+  setPrimaryDepartmentController,
 } from "../controllers/users.controller.js";
-import { requireAuth, requireRole } from "../middlewares/auth.js";
+import { requireAuth, requireMe } from "../middlewares/auth.js";
+import { canWriteUser } from "../middlewares/policy.js";
 
-const router = Router();
+const r = Router();
+r.use(requireAuth, requireMe);
 
-// อ่านข้อมูล (ต้องล็อกอิน)
-router.get("/", requireAuth, listUsersController);
-router.get("/:id", requireAuth, getUserController);
+// read
+r.get("/", ...listUsersController);
+r.get("/:id", ...getUserController);
 
-// จัดการข้อมูล (admin เท่านั้น)
-router.post("/", requireAuth, requireRole("admin"), createUserController);
-router.patch("/:id", requireAuth, requireRole("admin"), updateUserController);
-router.delete("/:id", requireAuth, requireRole("admin"), softDeleteUserController);
-router.post("/:id/primary/:udId", requireAuth, requireRole("admin"), setPrimaryDepartmentController);
+// write: admin | owner | manager(same dept) ; MD(MGT) ห้าม write
+r.post("/",                    canWriteUser(), ...createUserController);
+r.patch("/:id",                canWriteUser(), ...updateUserController);
+r.delete("/:id",               canWriteUser(), ...softDeleteUserController);
+r.post("/:id/restore",         canWriteUser(), ...restoreUserController);
+r.post("/:id/primary-department", canWriteUser(), ...setPrimaryDepartmentController);
 
-// ✅ Restore ผู้ใช้
-router.post("/:id/restore", requireAuth, requireRole("admin"), restoreUserController);
-
-export default router;
+export default r;

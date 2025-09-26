@@ -1,5 +1,5 @@
-// src/controllers/auth.controller.js
-import { prisma } from "../prisma.js";
+import { z } from "zod";
+import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   registerService,
   loginService,
@@ -14,24 +14,17 @@ import {
 const isProd = process.env.NODE_ENV === "production";
 const ACCESS_COOKIE = "access_token";
 const REFRESH_COOKIE = "refresh_token";
-
-// ค่าจาก .env (วินาที)
 const ACCESS_TTL = Number(process.env.ACCESS_TTL_SEC || 900);
 const REFRESH_TTL = Number(process.env.REFRESH_TTL_SEC || 604800);
 
-// คอนฟิกคุกกี้ให้ถูกบริบท: dev = Lax/!Secure, prod(HTTPS) = None/Secure
 function cookieBase() {
-  if (isProd) {
-    return { httpOnly: true, path: "/", sameSite: "none", secure: true };
-  }
-  // dev: พอร์ต 3000 ↔ 4000 ถือว่า same-site ได้ ใช้ Lax จะติดคุกกี้แน่นอน
-  return { httpOnly: true, path: "/", sameSite: "lax", secure: false };
+  return isProd
+    ? { httpOnly: true, path: "/", sameSite: "none", secure: true }
+    : { httpOnly: true, path: "/", sameSite: "lax", secure: false };
 }
-
 function setAuthCookies(res, tokens) {
   if (!tokens?.accessToken || !tokens?.refreshToken) return;
   const base = cookieBase();
-
   res.cookie(ACCESS_COOKIE, tokens.accessToken, {
     ...base,
     maxAge: (tokens.accessExp ?? ACCESS_TTL) * 1000,
@@ -41,182 +34,128 @@ function setAuthCookies(res, tokens) {
     maxAge: (tokens.refreshExp ?? REFRESH_TTL) * 1000,
   });
 }
-
 function clearAuthCookies(res) {
   const base = cookieBase();
   res.clearCookie(ACCESS_COOKIE, base);
   res.clearCookie(REFRESH_COOKIE, base);
 }
 
-function sendError(res, e, fallback = 400) {
-  const msg = e?.message || "UNKNOWN_ERROR";
-  const status =
-    e?.status ??
-    (msg === "LOGIN_FAILED"
-      ? 401
-      : msg === "INVALID_REFRESH"
-      ? 401
-      : msg === "USER_NOT_FOUND"
-      ? 404
-      : msg === "Email already in use"
-      ? 409
-      : fallback);
-  return res.status(status).json({ ok: false, error: msg });
-}
+/* ---------- Schemas ---------- */
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().trim().optional(),
+});
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+});
+const changePwdSchema = z.object({
+  currentPassword: z.string().min(6),
+  newPassword: z.string().min(8),
+});
+const resetPwdSchema = z.object({
+  token: z.string().min(10),
+  newPassword: z.string().min(8),
+});
 
-/** POST /auth/register */
-export async function registerController(req, res) {
-  try {
-    const user = await registerService({ prisma, payload: req.body || {} });
-    return res.json({ ok: true, user });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+/* ---------- Handlers ---------- */
 
-/** POST /auth/login */
-export async function loginController(req, res) {
-  try {
-    const { email, password } = req.body || {};
-    const result = await loginService({ prisma, email, password });
+// POST /api/auth/register
+export const registerController = [
+  asyncHandler(async (req, res) => {
+    const payload = registerSchema.parse(req.body ?? {});
+    const result = await registerService({ payload });
     setAuthCookies(res, result.tokens);
+    res.json({ ok: true, user: result.sessionUser, ...result.tokens });
+  }),
+];
 
-    return res.json({
-      ok: true,
-      user: result.sessionUser,
-      accessToken: result.tokens.accessToken,
-      refreshToken: result.tokens.refreshToken,
-      accessExp: result.tokens.accessExp,
-      refreshExp: result.tokens.refreshExp,
-    });
-  } catch (e) {
-    return sendError(res, e, 401);
-  }
-}
+// POST /api/auth/login
+export const loginController = [
+  asyncHandler(async (req, res) => {
+    const { email, password } = loginSchema.parse(req.body ?? {});
+    const result = await loginService({ email, password });
+    setAuthCookies(res, result.tokens);
+    res.json({ ok: true, user: result.sessionUser, ...result.tokens });
+  }),
+];
 
-/** POST /auth/refresh */
-export async function refreshController(req, res) {
-  try {
+// POST /api/auth/refresh
+export const refreshController = [
+  asyncHandler(async (req, res) => {
     const token =
       req.cookies?.[REFRESH_COOKIE] ||
       req.cookies?.refresh_token ||
       req.cookies?.refreshToken ||
       req.cookies?.REFRESH_TOKEN;
-
-    if (!token) {
+    if (!token)
       return res.status(401).json({ ok: false, error: "NO_REFRESH_TOKEN" });
-    }
 
-    const result = await refreshService({ prisma, refreshToken: token });
+    const result = await refreshService({ refreshToken: token });
     setAuthCookies(res, result.tokens);
+    res.json({ ok: true, user: result.sessionUser, ...result.tokens });
+  }),
+];
 
-    return res.json({
-      ok: true,
-      user: result.sessionUser,
-      accessToken: result.tokens.accessToken,
-      refreshToken: result.tokens.refreshToken,
-      accessExp: result.tokens.accessExp,
-      refreshExp: result.tokens.refreshExp,
-    });
-  } catch (e) {
-    clearAuthCookies(res);
-    return sendError(res, e, 401);
-  }
-}
-
-/** POST /auth/logout */
-export async function logoutController(_req, res) {
-  try {
+// POST /api/auth/logout
+export const logoutController = [
+  asyncHandler(async (_req, res) => {
     await logoutService();
-  } catch {}
-  clearAuthCookies(res);
-  return res.json({ ok: true });
-}
+    clearAuthCookies(res);
+    res.json({ ok: true });
+  }),
+];
 
-/** GET /auth/me */
-export async function meController(req, res) {
-  try {
+// GET /api/auth/me
+export const meController = [
+  asyncHandler(async (req, res) => {
     const id =
-      Number(req.user?.id) || Number(req.userId) || Number(req.auth?.sub) || null;
+      Number(req.user?.id) ||
+      Number(req.userId) ||
+      Number(req.auth?.sub) ||
+      null;
+    if (!id) return res.json({ ok: true, isAuthenticated: false, user: null });
+    const user = await meService({ userId: id });
+    res.json({ ok: true, isAuthenticated: true, user });
+  }),
+];
 
-    if (!id) {
-      return res.json({ ok: true, isAuthenticated: false, user: null });
-    }
-    const user = await meService({ prisma, userId: id });
-    return res.json({ ok: true, isAuthenticated: true, user });
-  } catch (e) {
-    return sendError(res, e, 401);
-  }
-}
+// POST /api/auth/forgot
+export const forgotPasswordController = [
+  asyncHandler(async (req, res) => {
+    const { email } = z
+      .object({ email: z.string().email() })
+      .parse(req.body ?? {});
+    await forgotPasswordService({ email });
+    res.json({ ok: true });
+  }),
+];
 
-/** POST /auth/forgot */
-export async function forgotPasswordController(req, res) {
-  try {
-    const { email } = req.body || {};
-    if (!email)
-      return res.status(400).json({ ok: false, error: "EMAIL_REQUIRED" });
-    await forgotPasswordService({ prisma, email });
-    return res.json({ ok: true });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+// POST /api/auth/reset
+export const resetPasswordController = [
+  asyncHandler(async (req, res) => {
+    const { token, newPassword } = resetPwdSchema.parse({
+      ...req.body,
+      token:
+        req.body?.token ?? req.query?.token ?? req.headers["x-reset-token"],
+    });
+    await resetPasswordService({ token, newPassword });
+    res.json({ ok: true });
+  }),
+];
 
-/** POST /auth/reset */
-export async function resetPasswordController(req, res) {
-  try {
-    const body = req.body || {};
-    const token = body.token || req.query?.token || req.headers["x-reset-token"];
-    const newPassword = body.newPassword || body.password;
-    const confirm = body.confirmPassword ?? body.newPasswordConfirm;
-
-    if (!token || !newPassword) {
-      return res.status(400).json({
-        ok: false,
-        error: "ต้องการข้อมูลเพิ่มเติม",
-        details: { need: ["token", "newPassword"] },
-      });
-    }
-    if (confirm !== undefined && confirm !== null && confirm !== newPassword) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "รหัสผ่านไม่ตรงกัน", details: { confirm } });
-    }
-    if (String(newPassword).length < 8) {
-      return res.status(400).json({
-        ok: false,
-        error: "รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร",
-        details: { minLength: 8 },
-      });
-    }
-
-    await resetPasswordService({ prisma, token, newPassword });
-    return res.json({ ok: true });
-  } catch (e) {
-    const raw = String(e?.message || "รีเซ็ตรหัสผ่านไม่สำเร็จ");
-    let error = raw;
-    if (/TOKEN_INVALID/i.test(raw)) error = "โทเค็นไม่ถูกต้อง";
-    else if (/TOKEN_EXPIRED/i.test(raw)) error = "โทเค็นหมดอายุ";
-    else if (/TOKEN_ALREADY_USED/i.test(raw)) error = "โทเค็นถูกใช้แล้ว";
-    else if (/TOKEN_OR_PASSWORD_REQUIRED/i.test(raw))
-      error = "ต้องการข้อมูลเพิ่มเติม";
-    else if (/PASSWORD_TOO_SHORT/i.test(raw))
-      error = "รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร";
-    return res.status(400).json({ ok: false, error });
-  }
-}
-
-/** POST /auth/change-password (protected) */
-export async function changePasswordController(req, res) {
-  try {
-    const userId = Number(req.user?.id) || Number(req.userId) || Number(req.auth?.sub);
+// POST /api/auth/change-password
+export const changePasswordController = [
+  asyncHandler(async (req, res) => {
+    const userId =
+      Number(req.user?.id) || Number(req.userId) || Number(req.auth?.sub);
     if (!userId)
-      return res.status(401).json({ ok: false, error: "ไม่มีสิทธิ์เข้าใช้งาน" });
-
-    const { currentPassword, newPassword } = req.body || {};
-    await changePasswordService({ prisma, userId, currentPassword, newPassword });
-    return res.json({ ok: true });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+      return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+    const { currentPassword, newPassword } = changePwdSchema.parse(
+      req.body ?? {}
+    );
+    await changePasswordService({ userId, currentPassword, newPassword });
+    res.json({ ok: true });
+  }),
+];

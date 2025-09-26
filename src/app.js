@@ -6,6 +6,9 @@ import { env } from "./config/env.js";
 import { httpLogger } from "./lib/logger.js";
 import { ensureUploadDirs, UPLOADS_BASE } from "./lib/paths.js";
 import { notFound, errorHandler } from "./middlewares/error.js";
+import swaggerUi from "swagger-ui-express";
+import path from "node:path";
+import fs from "node:fs";
 
 // routes (mount ใต้ /api)
 import authRouter from "./routes/auth.routes.js";
@@ -18,7 +21,7 @@ import contactsRouter from "./routes/contacts.routes.js";
 import organizationsRouter from "./routes/organizations.routes.js";
 import profileRouter from "./routes/profile.routes.js";
 import evalsRouter from "./routes/evals.routes.js";
-import cyclesRouter from "./routes/cycles.routes.js";
+import evalCyclesRouter from "./routes/eval-cycles.routes.js";
 
 export const app = express();
 const IS_PROD = env.NODE_ENV === "production";
@@ -51,6 +54,17 @@ app.use(
   })
 );
 
+
+let openapiSpec = null;
+try {
+  const specPath = path.resolve(process.cwd(), "src/docs/openapi.json");
+  openapiSpec = JSON.parse(fs.readFileSync(specPath, "utf-8"));
+} catch (e) {
+  console.error("Failed to load OpenAPI spec:", e?.message);
+  openapiSpec = { openapi: "3.0.3", info: { title: "API", version: "0.0.0" }, paths: {} };
+}
+
+
 // helper
 const API = (p = "") => `/api${p}`;
 
@@ -58,6 +72,10 @@ const API = (p = "") => `/api${p}`;
 app.get(API("/health"), (_req, res) => {
   res.json({ ok: true, env: env.NODE_ENV, time: new Date().toISOString() });
 });
+
+// Swagger UI
+app.get(API("/openapi.json"), (_req, res) => res.json(openapiSpec));
+app.use(API("/docs"), swaggerUi.serve, swaggerUi.setup(openapiSpec));
 
 // mount routes
 app.use(API("/auth"), authRouter);
@@ -70,7 +88,7 @@ app.use(API("/contacts"), contactsRouter);
 app.use(API("/organizations"), organizationsRouter);
 app.use(API("/profile"), profileRouter);
 app.use(API("/evals"), evalsRouter);
-app.use(API("/cycles"), cyclesRouter);
+app.use(API("/cycles"), evalCyclesRouter);
 
 // 404 + error handler (มาตรฐานอ่านง่าย)
 app.use(notFound);

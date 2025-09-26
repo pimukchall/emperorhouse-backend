@@ -5,17 +5,18 @@ import {
   getContactController,
   deleteContactController,
 } from "../controllers/contacts.controller.js";
-import { requireAuth, requireRole } from "../middlewares/auth.js";
+import { requireAuth } from "../middlewares/auth.js";
+import { anyOf, allowAdmin } from "../middlewares/policy.js";
 
-const router = Router();
+const r = Router();
 
-// public (ผู้ใช้ภายนอกส่งข้อความได้)
-router.post("/", createContactController);
+// public form submit
+r.post("/", ...createContactController);
 
-// admin-only (ดูรายการ + รายละเอียด + ลบ)
-router.get("/", requireAuth, requireRole("admin"), listContactsController);
-router.get("/:id", requireAuth, requireRole("admin"), getContactController);
-router.delete("/:id", requireAuth, requireRole("admin"), deleteContactController);
+// backoffice
+r.use(requireAuth);
+r.get("/", anyOf(allowAdmin), ...listContactsController);
+r.get("/:id", anyOf(allowAdmin), ...getContactController);
+r.delete("/:id", anyOf(allowAdmin), ...deleteContactController);
 
-export default router;
-export { router };
+export default r;

@@ -1,16 +1,21 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../middlewares/auth.js";
 import {
   listRolesController,
+  getRoleController,
   upsertRoleController,
   deleteRoleController,
 } from "../controllers/roles.controller.js";
+import { requireAuth } from "../middlewares/auth.js";
+import { anyOf, allowAdmin } from "../middlewares/policy.js";
 
-const router = Router();
+const r = Router();
+r.use(requireAuth);
 
-// admin เท่านั้น
-router.get("/", requireAuth, requireRole("admin"), listRolesController);
-router.post("/", requireAuth, requireRole("admin"), upsertRoleController);
-router.delete("/:name", requireAuth, requireRole("admin"), deleteRoleController);
+r.get("/", ...listRolesController);
+r.get("/:id", ...getRoleController);
 
-export default router;
+r.post("/", anyOf(allowAdmin), ...upsertRoleController);
+r.patch("/:id", anyOf(allowAdmin), ...upsertRoleController);
+r.delete("/:id", anyOf(allowAdmin), ...deleteRoleController);
+
+export default r;

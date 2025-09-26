@@ -1,27 +1,26 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../middlewares/auth.js";
 import {
   listAssignmentsController,
+  listByUserController,
   addOrUpdateAssignmentController,
-  endOrRenameAssignmentController,
   changeLevelController,
+  endOrRenameAssignmentController,
+  setPrimaryController,
 } from "../controllers/user-departments.controller.js";
+import { requireAuth, requireMe } from "../middlewares/auth.js";
+import { canWriteUserDepartment } from "../middlewares/policy.js";
 
-const router = Router({ mergeParams: true });
+const r = Router();
+r.use(requireAuth, requireMe);
 
-// รายการ assignment ของ user (ตัวเอง/ตามสิทธิ์) → ต้องล็อกอิน
-router.get("/", requireAuth, listAssignmentsController);
+// read (login users)
+r.get("/:id", ...listAssignmentsController);
+r.get("/users/:userId", ...listByUserController);
 
-// จัดการ assignment (admin)
-router.post("/", requireAuth, requireRole("admin"), addOrUpdateAssignmentController);
-router.patch("/:udId", requireAuth, requireRole("admin"), endOrRenameAssignmentController);
+// write: admin | manager(target dept) ; MD(MGT) ห้าม write
+r.post("/",                             canWriteUserDepartment(), ...addOrUpdateAssignmentController);
+r.patch("/:udId",                       canWriteUserDepartment(), ...endOrRenameAssignmentController);
+r.post("/change-level",                 canWriteUserDepartment(), ...changeLevelController);
+r.post("/users/:userId/primary/:udId",  canWriteUserDepartment(), ...setPrimaryController);
 
-// promote/demote (admin)
-router.post("/:udId/promote", requireAuth, requireRole("admin"), (req, res) =>
-  changeLevelController(req, res, "PROMOTE")
-);
-router.post("/:udId/demote", requireAuth, requireRole("admin"), (req, res) =>
-  changeLevelController(req, res, "DEMOTE")
-);
-
-export default router;
+export default r;

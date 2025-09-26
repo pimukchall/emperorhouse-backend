@@ -1,29 +1,14 @@
-export function parsePaging(req, { defaultLimit = 20, maxLimit = 100 } = {}) {
-  const page = Math.max(1, Number(req.query.page || 1));
-  const limit = Math.min(maxLimit, Math.max(1, Number(req.query.limit || defaultLimit)));
-  const sort = (req.query.sort || "desc").toString().toLowerCase() === "asc" ? "asc" : "desc";
-  const sortBy = (req.query.sortBy || req.query.orderBy || "id").toString();
-  const skip = (page - 1) * limit;
-  return { page, limit, skip, sort, sortBy };
-}
-
-/**
- * คืน object สำหรับ Prisma string filter แบบ "contains"
- * **ไม่** ใส่ { mode: "insensitive" } เพื่อให้ทำงานได้ทุกฐาน
- */
-export function ilikeContains(v) {
-  if (v === undefined || v === null) return undefined;
-  const s = String(v).trim();
-  if (!s) return undefined;
-  return { contains: s };
-}
-
-export function toInt(v) {
+export function toInt(v, def = 0) {
   const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : def;
 }
 
-export function pickSort(field, allowed = []) {
-  const f = (field || "").toString();
+export function pickSort(field, allowed) {
+  const f = String(field || "");
   return allowed.includes(f) ? f : allowed[0];
+}
+
+export function ilikeContains(value) {
+  const v = String(value ?? "").trim();
+  return v ? { contains: v, mode: "insensitive" } : undefined;
 }

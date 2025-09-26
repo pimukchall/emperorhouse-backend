@@ -1,0 +1,723 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EMP One Backend API",
+    "version": "0.1.0",
+    "description": "REST API for EMP One (users, departments, evals, auth, files, etc.)"
+  },
+  "servers": [
+    { "url": "http://localhost:4000/api" }
+  ],
+  "tags": [
+    { "name": "Auth" },
+    { "name": "Users" },
+    { "name": "UserDepartments" },
+    { "name": "Departments" },
+    { "name": "Organizations" },
+    { "name": "Roles" },
+    { "name": "Evals" },
+    { "name": "EvalCycles" },
+    { "name": "Contacts" },
+    { "name": "Files" },
+    { "name": "Profile" },
+    { "name": "Health" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Service health",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } }
+          }
+        }
+      }
+    },
+
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register new user",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterPayload" } } }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } },
+          "400": { "description": "Bad Request" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginPayload" } } }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current session",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionUser" } } } },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh token",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RefreshResponse" } } } }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Logout",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+
+    "/users": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "List users",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } },
+          { "name": "q", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListResponseUsers" } } } }
+        }
+      },
+      "post": {
+        "tags": ["Users"],
+        "summary": "Create user",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserCreatePayload" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
+          "403": { "description": "Forbidden" }
+        }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Get user by id",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } } }
+      },
+      "patch": {
+        "tags": ["Users"],
+        "summary": "Update user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserUpdatePayload" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Users"],
+        "summary": "Soft delete user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/users/{id}/restore": {
+      "post": {
+        "tags": ["Users"],
+        "summary": "Restore soft-deleted user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/users/{id}/primary-department": {
+      "post": {
+        "tags": ["Users"],
+        "summary": "Set primary department of the user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "udId": { "type": "integer" } }, "required": ["udId"] } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/user-departments/{id}": {
+      "get": {
+        "tags": ["UserDepartments"],
+        "summary": "List assignments (by :id = userId)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "activeOnly", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/user-departments/users/{userId}": {
+      "get": {
+        "tags": ["UserDepartments"],
+        "summary": "List assignments by userId",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "activeOnly", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/user-departments": {
+      "post": {
+        "tags": ["UserDepartments"],
+        "summary": "Add or update assignment",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AssignmentPayload" } } } },
+        "responses": { "201": { "description": "Created" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/user-departments/{udId}": {
+      "patch": {
+        "tags": ["UserDepartments"],
+        "summary": "End or rename assignment",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "udId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AssignmentEndRename" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/user-departments/change-level": {
+      "post": {
+        "tags": ["UserDepartments"],
+        "summary": "Change level with audit log",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChangeLevelPayload" } } } },
+        "responses": { "200": { "description": "OK" }, "400": { "description": "Bad Request" }, "403": { "description": "Forbidden" }, "409": { "description": "Conflict" } }
+      }
+    },
+    "/user-departments/users/{userId}/primary/{udId}": {
+      "post": {
+        "tags": ["UserDepartments"],
+        "summary": "Set user's primary assignment",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "udId", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/departments": {
+      "get": {
+        "tags": ["Departments"],
+        "summary": "List departments",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["Departments"],
+        "summary": "Create/Upsert department (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DepartmentPayload" } } } },
+        "responses": { "201": { "description": "Created" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/departments/{id}": {
+      "get": {
+        "tags": ["Departments"],
+        "summary": "Get department",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      },
+      "patch": {
+        "tags": ["Departments"],
+        "summary": "Update department (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DepartmentPayload" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Departments"],
+        "summary": "Delete department (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/organizations": {
+      "get": {
+        "tags": ["Organizations"],
+        "summary": "List organizations",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["Organizations"],
+        "summary": "Create organization (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrganizationPayload" } } } },
+        "responses": { "201": { "description": "Created" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/organizations/{id}": {
+      "get": {
+        "tags": ["Organizations"],
+        "summary": "Get organization",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "patch": {
+        "tags": ["Organizations"],
+        "summary": "Update organization (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrganizationPayload" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Organizations"],
+        "summary": "Delete organization (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/organizations/{id}/restore": {
+      "post": {
+        "tags": ["Organizations"],
+        "summary": "Restore organization (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/roles": {
+      "get": {
+        "tags": ["Roles"],
+        "summary": "List roles",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["Roles"],
+        "summary": "Upsert role (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "labelTh": { "type": "string" }, "labelEn": { "type": "string" } }, "required": ["name"] } } } },
+        "responses": { "201": { "description": "Created" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/roles/{id}": {
+      "get": {
+        "tags": ["Roles"],
+        "summary": "Get role",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "patch": {
+        "tags": ["Roles"],
+        "summary": "Update role (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Roles"],
+        "summary": "Delete role (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/evals": {
+      "get": {
+        "tags": ["Evals"],
+        "summary": "List evals",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "tags": ["Evals"],
+        "summary": "Create evaluation (admin/owner/manager same dept)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EvalPayload" } } } },
+        "responses": { "201": { "description": "Created" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/evals/{id}": {
+      "get": {
+        "tags": ["Evals"],
+        "summary": "Get evaluation",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "patch": {
+        "tags": ["Evals"],
+        "summary": "Update evaluation",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Evals"],
+        "summary": "Delete evaluation",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/evals/{id}/submit": {
+      "post": {
+        "tags": ["Evals"],
+        "summary": "Submit evaluation",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/evals/{id}/approve/manager": {
+      "post": {
+        "tags": ["Evals"],
+        "summary": "Approve by manager (admin or assigned manager)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/evals/{id}/approve/md": {
+      "post": {
+        "tags": ["Evals"],
+        "summary": "Approve by MD (admin or MD in MGT)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/evals/{id}/reject": {
+      "post": {
+        "tags": ["Evals"],
+        "summary": "Reject by approver (admin/MD)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/evals/eligible/{cycleId}": {
+      "get": {
+        "tags": ["Evals"],
+        "summary": "List eligible users for a cycle",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "cycleId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+
+    "/eval-cycles": {
+      "get": { "tags": ["EvalCycles"], "summary": "List cycles", "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK" } } },
+      "post": {
+        "tags": ["EvalCycles"], "summary": "Create cycle (admin only)", "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CyclePayload" } } } },
+        "responses": { "201": { "description": "Created" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/eval-cycles/{id}": {
+      "get": {
+        "tags": ["EvalCycles"], "summary": "Get cycle", "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "patch": {
+        "tags": ["EvalCycles"], "summary": "Update cycle (admin only)", "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CyclePayload" } } } },
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["EvalCycles"], "summary": "Delete cycle (admin only)", "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/contacts": {
+      "post": {
+        "tags": ["Contacts"],
+        "summary": "Public submit contact form",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ContactPayload" } } } },
+        "responses": { "201": { "description": "Created" } }
+      },
+      "get": {
+        "tags": ["Contacts"],
+        "summary": "List contacts (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+    "/contacts/{id}": {
+      "get": {
+        "tags": ["Contacts"],
+        "summary": "Get a contact (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Contacts"],
+        "summary": "Delete a contact (admin only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" }, "403": { "description": "Forbidden" } }
+      }
+    },
+
+    "/files/avatar": {
+      "post": {
+        "tags": ["Files"],
+        "summary": "Upload avatar (multipart/form-data)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "properties": { "file": { "type": "string", "format": "binary" } }, "required": ["file"] } } }
+        },
+        "responses": { "200": { "description": "OK" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/files/avatar/{id}": {
+      "get": {
+        "tags": ["Files"],
+        "summary": "Get avatar file",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "File" } }
+      }
+    },
+    "/files/signature": {
+      "post": {
+        "tags": ["Files"],
+        "summary": "Upload signature (multipart/form-data)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "properties": { "file": { "type": "string", "format": "binary" } }, "required": ["file"] } } }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/files/signature/{id}": {
+      "get": {
+        "tags": ["Files"],
+        "summary": "Get signature file",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "File" } }
+      }
+    },
+
+    "/profile/me": {
+      "patch": {
+        "tags": ["Profile"],
+        "summary": "Update my profile",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "OK" }, "401": { "description": "Unauthorized" } }
+      }
+    }
+  },
+
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": { "ok": { "type": "boolean" }, "env": { "type": "string" }, "time": { "type": "string", "format": "date-time" } }
+      },
+      "SessionUser": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "email": { "type": "string" },
+          "roleName": { "type": "string" },
+          "primaryDeptId": { "type": "integer", "nullable": true },
+          "primaryDeptCode": { "type": "string", "nullable": true },
+          "primaryLevel": { "type": "string", "enum": ["STAF", "SVR", "ASST", "MANAGER", "MD"], "nullable": true },
+          "departments": { "type": "array", "items": { "$ref": "#/components/schemas/DeptLite" } }
+        }
+      },
+      "DeptLite": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" }, "code": { "type": "string" }, "nameTh": { "type": "string" }, "nameEn": { "type": "string" }, "level": { "type": "string" } }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "accessToken": { "type": "string" },
+          "refreshToken": { "type": "string" },
+          "user": { "$ref": "#/components/schemas/SessionUser" }
+        }
+      },
+      "RefreshResponse": {
+        "type": "object",
+        "properties": { "accessToken": { "type": "string" } }
+      },
+      "RegisterPayload": {
+        "type": "object",
+        "required": ["email", "password", "name"],
+        "properties": { "email": { "type": "string" }, "password": { "type": "string" }, "name": { "type": "string" } }
+      },
+      "LoginPayload": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": { "email": { "type": "string" }, "password": { "type": "string" } }
+      },
+
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "email": { "type": "string" },
+          "name": { "type": "string" },
+          "roleName": { "type": "string" },
+          "primaryLevel": { "type": "string", "enum": ["STAF", "SVR", "ASST", "MANAGER", "MD"], "nullable": true },
+          "deletedAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "UserCreatePayload": {
+        "type": "object",
+        "required": ["email", "password", "name", "roleId"],
+        "properties": {
+          "email": { "type": "string" },
+          "password": { "type": "string" },
+          "name": { "type": "string" },
+          "roleId": { "type": "integer" }
+        }
+      },
+      "UserUpdatePayload": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "roleId": { "type": "integer" },
+          "orgId": { "type": "integer", "nullable": true }
+        }
+      },
+
+      "AssignmentPayload": {
+        "type": "object",
+        "required": ["userId", "departmentId", "positionLevel"],
+        "properties": {
+          "userId": { "type": "integer" },
+          "departmentId": { "type": "integer" },
+          "positionLevel": { "type": "string", "enum": ["STAF", "SVR", "ASST", "MANAGER", "MD"] },
+          "positionName": { "type": "string", "nullable": true },
+          "startedAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "AssignmentEndRename": {
+        "type": "object",
+        "properties": {
+          "positionName": { "type": "string", "nullable": true },
+          "endedAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "ChangeLevelPayload": {
+        "type": "object",
+        "required": ["udId", "newLevel"],
+        "properties": {
+          "udId": { "type": "integer" },
+          "newLevel": { "type": "string", "enum": ["STAF", "SVR", "ASST", "MANAGER", "MD"] },
+          "actorId": { "type": "integer", "nullable": true },
+          "effectiveDate": { "type": "string", "format": "date-time", "nullable": true },
+          "reason": { "type": "string", "nullable": true },
+          "newPositionName": { "type": "string", "nullable": true }
+        }
+      },
+
+      "DepartmentPayload": {
+        "type": "object",
+        "required": ["code", "nameTh", "nameEn"],
+        "properties": { "code": { "type": "string" }, "nameTh": { "type": "string" }, "nameEn": { "type": "string" } }
+      },
+      "OrganizationPayload": {
+        "type": "object",
+        "required": ["code", "nameTh", "nameEn"],
+        "properties": { "code": { "type": "string" }, "nameTh": { "type": "string" }, "nameEn": { "type": "string" } }
+      },
+
+      "CyclePayload": {
+        "type": "object",
+        "required": ["code", "year", "stage", "openAt", "closeAt"],
+        "properties": {
+          "code": { "type": "string" },
+          "year": { "type": "integer" },
+          "stage": { "type": "string", "enum": ["MID_YEAR", "YEAR_END"] },
+          "openAt": { "type": "string", "format": "date-time" },
+          "closeAt": { "type": "string", "format": "date-time" },
+          "isActive": { "type": "boolean", "default": true },
+          "isMandatory": { "type": "boolean", "default": true }
+        }
+      },
+
+      "EvalPayload": {
+        "type": "object",
+        "required": ["ownerId", "cycleId", "type", "stage"],
+        "properties": {
+          "ownerId": { "type": "integer" },
+          "cycleId": { "type": "integer" },
+          "type": { "type": "string", "enum": ["OPERATIONAL", "SUPERVISOR"] },
+          "stage": { "type": "string", "enum": ["MID_YEAR", "YEAR_END"] },
+          "scores": { "type": "object", "description": "Score fields depend on EvalType" }
+        }
+      },
+
+      "ContactPayload": {
+        "type": "object",
+        "required": ["name", "email", "subject", "message"],
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "phone": { "type": "string", "nullable": true },
+          "subject": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+
+      "ListResponseUsers": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/User" } },
+          "meta": { "type": "object", "properties": { "page": { "type": "integer" }, "limit": { "type": "integer" }, "total": { "type": "integer" } } }
+        }
+      }
+    }
+  }
+}

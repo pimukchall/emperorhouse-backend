@@ -1,82 +1,92 @@
-import { prisma } from "../prisma.js";
+import { z } from "zod";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { validate } from "../middlewares/validate.js";
 import {
-  listAssignmentsService,
-  addOrUpdateAssignmentService,
+  assignUserToDepartmentService,
   endOrRenameAssignmentService,
   changeLevelService,
+  listAssignmentsService,
+  listAssignmentsByUser,
+  setPrimaryAssignmentService,
 } from "../services/user-departments.service.js";
 
-const mapErr = (e, kind) => {
-  const table = {
-    INVALID_DEPT: [400, "Invalid departmentId"],
-    QMR_QMS: [400, "QMR must belong to QMS department"],
-    MD_ALREADY_EXISTS_IN_DEPARTMENT: [409, "มี MD อยู่แล้วในแผนกนี้"],
-    USER_DEPARTMENT_NOT_FOUND: [404, "ไม่พบข้อมูล assignment"],
-    ENDED: [400, `Cannot ${String(kind || "change").toLowerCase()} ended assignment`],
-    FORBIDDEN: [403, "Forbidden: insufficient privilege to set this level"],
-    MISSING_TOLEVEL: [400, "toLevel required"],
-    INVALID_POSITION_LEVEL: [400, "ระดับตำแหน่งไม่ถูกต้อง"],
-  };
-  return table[e?.message] || [e?.status || 400, e?.message || "Bad request"];
-};
+const assignSchema = z.object({
+  userId: z.number().int().positive(),
+  departmentId: z.number().int().positive(),
+  positionLevel: z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]),
+  positionName: z.string().trim().nullable().optional(),
+  startedAt: z.string().datetime().optional(),
+});
+const endOrRenameSchema = z.object({
+  positionName: z.string().trim().nullable().optional(),
+  endedAt: z.string().datetime().optional(),
+});
+const changeLevelSchema = z.object({
+  udId: z.number().int().positive(),
+  newLevel: z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]),
+  actorId: z.number().int().positive().nullable().optional(),
+  effectiveDate: z.string().datetime().optional(),
+  reason: z.string().trim().nullable().optional(),
+  newPositionName: z.string().trim().nullable().optional(),
+});
 
-export async function listAssignmentsController(req, res) {
-  try {
+// GET /api/user-departments/:id?activeOnly=true
+export const listAssignmentsController = [
+  asyncHandler(async (req, res) => {
     const userId = Number(req.params.id);
-    const data = await listAssignmentsService({ prisma, userId });
+    const activeOnly = String(req.query.activeOnly || "") === "true";
+    const data = await listAssignmentsService({ userId, activeOnly });
     res.json({ ok: true, data });
-  } catch (e) {
-    const [c, m] = mapErr(e);
-    res.status(c).json({ ok: false, error: m });
-  }
-}
+  }),
+];
 
-export async function addOrUpdateAssignmentController(req, res) {
-  try {
-    const userId = Number(req.params.id);
-    const { departmentId, positionLevel, positionName, startedAt } = req.body || {};
-    const data = await addOrUpdateAssignmentService({
-      prisma,
-      userId,
-      departmentId,
-      positionLevel,
-      positionName,
-      startedAt,
+// GET /api/user-departments/users/:userId?activeOnly=true
+export const listByUserController = [
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.params.userId);
+    const activeOnly = String(req.query.activeOnly || "") === "true";
+    const data = await listAssignmentsByUser({ userId, activeOnly });
+    res.json({ ok: true, data });
+  }),
+];
+
+// POST /api/user-departments
+export const addOrUpdateAssignmentController = [
+  validate(assignSchema),
+  asyncHandler(async (req, res) => {
+    const out = await assignUserToDepartmentService({ ...req.body });
+    res.status(201).json({ ok: true, data: out });
+  }),
+];
+
+// POST /api/user-departments/change-level
+export const changeLevelController = [
+  validate(changeLevelSchema),
+  asyncHandler(async (req, res) => {
+    const out = await changeLevelService({
+      ...req.body,
+      actorId: req.me?.id ?? null,
     });
-    res.status(201).json({ ok: true, data });
-  } catch (e) {
-    const [c, m] = mapErr(e);
-    res.status(c).json({ ok: false, error: m });
-  }
-}
+    res.json({ ok: true, data: out });
+  }),
+];
 
-export async function endOrRenameAssignmentController(req, res) {
-  try {
+// PATCH /api/user-departments/:udId
+export const endOrRenameAssignmentController = [
+  validate(endOrRenameSchema),
+  asyncHandler(async (req, res) => {
     const udId = Number(req.params.udId);
-    const { positionName, endedAt } = req.body || {};
-    const data = await endOrRenameAssignmentService({ prisma, udId, positionName, endedAt });
-    res.json({ ok: true, data });
-  } catch (e) {
-    const [c, m] = mapErr(e);
-    res.status(c).json({ ok: false, error: m });
-  }
-}
+    const out = await endOrRenameAssignmentService({ udId, ...req.body });
+    res.json({ ok: true, data: out });
+  }),
+];
 
-export async function changeLevelController(req, res, kind) {
-  try {
+// POST /api/user-departments/users/:userId/primary/:udId
+export const setPrimaryController = [
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.params.userId);
     const udId = Number(req.params.udId);
-    const { toLevel, positionName, reason } = req.body || {};
-    const data = await changeLevelService({
-      prisma,
-      udId,
-      newLevel: toLevel,
-      newPositionName: positionName,
-      reason,
-      actorId: req.user?.id || req.user?.id || req.userId || req.auth?.sub || null,
-    });
-    res.json({ ok: true, data });
-  } catch (e) {
-    const [c, m] = mapErr(e, kind);
-    res.status(c).json({ ok: false, error: m });
-  }
-}
+    const out = await setPrimaryAssignmentService({ userId, udId });
+    res.json({ ok: true, data: out });
+  }),
+];

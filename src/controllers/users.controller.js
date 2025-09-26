@@ -1,4 +1,5 @@
-import { prisma } from "../prisma.js";
+import { z } from "zod";
+import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   listUsersService,
   getUserService,
@@ -9,120 +10,105 @@ import {
   setPrimaryDepartmentService,
 } from "../services/users.service.js";
 
-/* ----------------------------- Helpers ----------------------------- */
-function bool(v, def = false) {
-  if (v === undefined || v === null) return def;
-  const s = String(v).trim().toLowerCase();
-  return s === "1" || s === "true" || s === "yes";
-}
-function sendError(res, e, fallback = 400) {
-  const msg = e?.message || "UNKNOWN_ERROR";
-  const status =
-    e?.status ??
-    (msg === "USER_NOT_FOUND"
-      ? 404
-      : msg === "DUPLICATE_EMPLOYEE_CODE"
-      ? 409
-      : fallback);
-  return res.status(status).json({ ok: false, error: msg });
-}
+const createSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6).optional(),
+  name: z.string().trim().optional(),
+  roleId: z.number().int().positive().optional(),
+  orgId: z.number().int().positive().nullable().optional(),
+  firstNameTh: z.string().trim().optional(),
+  lastNameTh: z.string().trim().optional(),
+  firstNameEn: z.string().trim().optional(),
+  lastNameEn: z.string().trim().optional(),
+  birthDate: z.string().datetime().nullable().optional(),
+  gender: z
+    .enum(["MALE", "FEMALE", "OTHER", "UNSPECIFIED"])
+    .nullable()
+    .optional(),
+});
+const updateSchema = createSchema.partial();
+const setPrimarySchema = z.object({
+  departmentId: z.number().int().positive(),
+});
 
-/* ----------------------------- Controllers ----------------------------- */
-
-// GET /api/users
-export async function listUsersController(req, res) {
-  try {
-    const { page, limit, q, includeDeleted, roleId, departmentId, sortBy, sort } = req.query;
+export const listUsersController = [
+  asyncHandler(async (req, res) => {
+    const {
+      page,
+      limit,
+      q,
+      includeDeleted,
+      roleId,
+      departmentId,
+      sortBy,
+      sort,
+    } = req.query;
     const result = await listUsersService({
-      prisma,
       page: Number(page) || 1,
       limit: Number(limit) || 20,
       q: q ?? "",
-      includeDeleted: bool(includeDeleted, false),
+      includeDeleted: ["1", "true", "yes"].includes(
+        String(includeDeleted || "").toLowerCase()
+      ),
       roleId: roleId ?? "",
       departmentId: departmentId ?? "",
       sortBy: sortBy ?? "id",
       sort: sort ?? "asc",
     });
-    return res.json({ ok: true, data: result.data, meta: result.meta });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+    res.json({ ok: true, data: result.data, meta: result.meta });
+  }),
+];
 
-// GET /api/users/:id
-export async function getUserController(req, res) {
-  try {
-    const { id } = req.params;
-    const data = await getUserService({ prisma, id });
-    return res.json({ ok: true, data });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+export const getUserController = [
+  asyncHandler(async (req, res) => {
+    const data = await getUserService({ id: req.params.id });
+    res.json({ ok: true, data });
+  }),
+];
 
-// POST /api/users
-export async function createUserController(req, res) {
-  try {
-    const data = req.body || {};
-    const created = await createUserService({ prisma, data });
-    return res.status(201).json({ ok: true, data: created });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+export const createUserController = [
+  asyncHandler(async (req, res) => {
+    const data = await createUserService({
+      data: createSchema.parse(req.body ?? {}),
+    });
+    res.status(201).json({ ok: true, data });
+  }),
+];
 
-// PATCH /api/users/:id
-export async function updateUserController(req, res) {
-  try {
-    const { id } = req.params;
-    const data = req.body || {};
-    const updated = await updateUserService({ prisma, id, data });
-    return res.json({ ok: true, data: updated });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+export const updateUserController = [
+  asyncHandler(async (req, res) => {
+    const data = await updateUserService({
+      id: req.params.id,
+      data: updateSchema.parse(req.body ?? {}),
+    });
+    res.json({ ok: true, data });
+  }),
+];
 
-// DELETE /api/users/:id   (soft by default; use ?hard=1 for hard delete)
-export async function softDeleteUserController(req, res) {
-  try {
-    const { id } = req.params;
-    const hard = bool(req.query?.hard, false);
-    const deleted = await softDeleteUserService({ prisma, id, hard });
-    return res.json({ ok: true, data: deleted });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+export const softDeleteUserController = [
+  asyncHandler(async (req, res) => {
+    const hard = ["1", "true"].includes(
+      String(req.query?.hard || "").toLowerCase()
+    );
+    const data = await softDeleteUserService({ id: req.params.id, hard });
+    res.json({ ok: true, data });
+  }),
+];
 
-// POST /api/users/:id/restore
-export async function restoreUserController(req, res) {
-  try {
-    const { id } = req.params;
-    const data = await restoreUserService({ prisma, id });
-    return res.json({ ok: true, data });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+export const restoreUserController = [
+  asyncHandler(async (req, res) => {
+    const data = await restoreUserService({ id: req.params.id });
+    res.json({ ok: true, data });
+  }),
+];
 
-// POST /api/users/:id/primary-department
-// body: { departmentId: number }
-export async function setPrimaryDepartmentController(req, res) {
-  try {
-    const { id } = req.params;
-    const { departmentId } = req.body || {};
-    if (!departmentId) {
-      return res.status(400).json({ ok: false, error: "departmentId required" });
-    }
+export const setPrimaryDepartmentController = [
+  asyncHandler(async (req, res) => {
+    const { departmentId } = setPrimarySchema.parse(req.body ?? {});
     const data = await setPrimaryDepartmentService({
-      prisma,
-      userId: Number(id),
+      userId: Number(req.params.id),
       departmentId: Number(departmentId),
     });
-    return res.json({ ok: true, data });
-  } catch (e) {
-    return sendError(res, e);
-  }
-}
+    res.json({ ok: true, data });
+  }),
+];

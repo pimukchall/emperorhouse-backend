@@ -1,22 +1,21 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../middlewares/auth.js";
 import {
   listDepartmentsController,
   getDepartmentController,
   upsertDepartmentController,
   deleteDepartmentController,
 } from "../controllers/departments.controller.js";
+import { requireAuth } from "../middlewares/auth.js";
+import { anyOf, allowAdmin } from "../middlewares/policy.js";
 
-const router = Router();
+const r = Router();
+r.use(requireAuth);
 
-// ต้องล็อกอินเพื่อดูรายการ/ดูรายละเอียด
-router.get("/", requireAuth, listDepartmentsController);
-router.get("/:id", requireAuth, getDepartmentController);
+r.get("/", ...listDepartmentsController);
+r.get("/:id", ...getDepartmentController);
 
-// admin เท่านั้น (สร้าง/แก้ด้วย upsert)
-router.post("/", requireAuth, requireRole("admin"), upsertDepartmentController);
+r.post("/",  anyOf(allowAdmin), ...upsertDepartmentController);
+r.patch("/:id", anyOf(allowAdmin), ...upsertDepartmentController);
+r.delete("/:id", anyOf(allowAdmin), ...deleteDepartmentController);
 
-// admin เท่านั้น (ลบ)
-router.delete("/:id", requireAuth, requireRole("admin"), deleteDepartmentController);
-
-export default router;
+export default r;

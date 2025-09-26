@@ -1,4 +1,5 @@
-// src/controllers/evals.controller.js
+import { z } from "zod";
+import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   createEvaluation,
   getEvaluation,
@@ -12,182 +13,137 @@ import {
   listEligibleEvaluatees,
 } from "../services/eval.service.js";
 
-// helper ส่ง error เป็น JSON (ไม่ต้อง import จาก errors.js)
-function sendErr(res, e, def = 400) {
-  const status = e?.status || def;
-  const payload = {
-    ok: false,
-    error: e?.code || e?.message || "BAD_REQUEST",
-    message: e?.message || undefined,
-  };
-  return res.status(status).json(payload);
-}
+/* ---------- Schemas (เฉพาะที่เป็น input ตรง ๆ) ---------- */
+const createSchema = z.object({
+  cycleId: z.coerce.number().int().positive(),
+  ownerId: z.coerce.number().int().positive().optional(), // ไม่ส่ง = me
+  managerId: z.coerce.number().int().positive().nullable().optional(),
+  mdId: z.coerce.number().int().positive().nullable().optional(),
+  type: z.enum(["OPERATIONAL", "SUPERVISOR"]).optional(),
+});
+const updateSchema = z.record(z.any());
+const signSchema = z.object({
+  signature: z.string().min(16),
+  comment: z.string().trim().nullable().optional(),
+});
 
-function currentUserId(req) {
-  return req?.me?.id;
-}
+const meId = (req) => req?.me?.id;
 
-// ============== LIST / GET ==============
-export async function listEvalsController(req, res) {
-  try {
+/* ---------- LIST / GET ---------- */
+export const listEvalsController = [
+  asyncHandler(async (req, res) => {
     const where = {};
     if (req.query.cycleId) where.cycleId = Number(req.query.cycleId);
-    if (req.query.owner === "me") where.ownerId = currentUserId(req);
+    if (req.query.owner === "me") where.ownerId = meId(req);
     if (req.query.ownerId) where.ownerId = Number(req.query.ownerId);
     if (req.query.status) where.status = String(req.query.status).toUpperCase();
-
     const rows = await listEvaluations(where);
     res.json({ ok: true, data: rows });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-export async function getEvalController(req, res) {
-  try {
+export const getEvalController = [
+  asyncHandler(async (req, res) => {
     const row = await getEvaluation(Number(req.params.id));
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e, 404);
-  }
-}
+  }),
+];
 
-// ============== CREATE / UPDATE / DELETE ==============
-export async function createEvalController(req, res) {
-  try {
-    const byUserId = currentUserId(req);
-    const body = req.body || {};
-    const cycleId = Number(body.cycleId);
-    const ownerId = Number(body.ownerId || byUserId); // ไม่ระบุ = สร้างให้ตัวเอง
-    const managerId = body.managerId ? Number(body.managerId) : null;
-    const mdId = body.mdId ? Number(body.mdId) : null;
-    const type = body.type || "OPERATIONAL";
-
-    if (!cycleId) return res.status(400).json({ ok: false, error: "CYCLE_ID_REQUIRED" });
-
+/* ---------- CREATE / UPDATE / DELETE ---------- */
+export const createEvalController = [
+  asyncHandler(async (req, res) => {
+    const body = createSchema.parse(req.body || {});
     const row = await createEvaluation({
-      cycleId,
-      ownerId,
-      managerId,
-      mdId,
-      type,
-      byUserId,
+      ...body,
+      ownerId: body.ownerId ?? meId(req),
+      byUserId: meId(req),
     });
     res.status(201).json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-export async function updateEvalController(req, res) {
-  try {
-    const id = Number(req.params.id);
-    const data = req.body || {};
-    const row = await updateEvaluation(id, data, currentUserId(req));
+export const updateEvalController = [
+  asyncHandler(async (req, res) => {
+    const row = await updateEvaluation(
+      Number(req.params.id),
+      updateSchema.parse(req.body || {}),
+      meId(req)
+    );
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-export async function deleteEvalController(req, res) {
-  try {
-    const id = Number(req.params.id);
-    const row = await deleteEvaluation(id);
+export const deleteEvalController = [
+  asyncHandler(async (req, res) => {
+    const row = await deleteEvaluation(Number(req.params.id));
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-// ============== FLOW (submit/approve/reject) ==============
-export async function submitEvalController(req, res) {
-  try {
-    const id = Number(req.params.id);
-    const row = await submitEvaluation(id, currentUserId(req), {
-      signature: req.body?.submitterSignature,
-      comment: req.body?.submitterComment,
-    });
+/* ---------- FLOW (submit/approve/reject) ---------- */
+export const submitEvalController = [
+  asyncHandler(async (req, res) => {
+    const row = await submitEvaluation(
+      Number(req.params.id),
+      meId(req),
+      signSchema.parse(req.body || {})
+    );
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-export async function approveManagerController(req, res) {
-  try {
-    const id = Number(req.params.id);
-    const row = await approveByManager(id, currentUserId(req), {
-      signature: req.body?.managerSignature,
-      comment: req.body?.managerComment,
-    });
+export const approveManagerController = [
+  asyncHandler(async (req, res) => {
+    const row = await approveByManager(
+      Number(req.params.id),
+      meId(req),
+      signSchema.parse(req.body || {})
+    );
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-export async function approveMDController(req, res) {
-  try {
-    const id = Number(req.params.id);
-    const row = await approveByMD(id, currentUserId(req), {
-      signature: req.body?.mdSignature,
-      comment: req.body?.mdComment,
-    });
+export const approveMDController = [
+  asyncHandler(async (req, res) => {
+    const row = await approveByMD(
+      Number(req.params.id),
+      meId(req),
+      signSchema.parse(req.body || {})
+    );
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-export async function rejectEvalController(req, res) {
-  try {
-    const id = Number(req.params.id);
-    const row = await rejectEvaluation(id, currentUserId(req), req.body?.comment || "");
+export const rejectEvalController = [
+  asyncHandler(async (req, res) => {
+    const comment = String(req.body?.comment || "");
+    const row = await rejectEvaluation(
+      Number(req.params.id),
+      meId(req),
+      comment
+    );
     res.json({ ok: true, data: row });
-  } catch (e) {
-    sendErr(res, e);
-  }
-}
+  }),
+];
 
-// ============== ELIGIBLE (เลือกผู้ถูกประเมินตามเงื่อนไข) ==============
-export async function listEligibleController(req, res) {
-  try {
+/* ---------- Eligible list ---------- */
+export const listEligibleController = [
+  asyncHandler(async (req, res) => {
     const cycleId = Number(req.params.cycleId || req.query.cycleId);
-    if (!cycleId) return res.status(400).json({ ok: false, error: "CYCLE_ID_REQUIRED" });
+    if (!cycleId)
+      return res.status(400).json({ ok: false, error: "CYCLE_ID_REQUIRED" });
 
-    // ✅ กันเคสยังไม่ล็อกอิน/ไม่มี me.id
-    if (!req?.me?.id) {
-      return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
-    }
+    const includeSelf = ["1", "true"].includes(
+      String(req.query.includeSelf || "").toLowerCase()
+    );
+    const includeTaken = ["1", "true"].includes(
+      String(req.query.includeTaken || "").toLowerCase()
+    );
 
-    const includeSelf  = String(req.query.includeSelf || "").toLowerCase() === "1" || String(req.query.includeSelf || "").toLowerCase() === "true";
-    const includeTaken = String(req.query.includeTaken || "").toLowerCase() === "1" || String(req.query.includeTaken || "").toLowerCase() === "true";
-
-    const arr = await listEligibleEvaluatees(cycleId, req.me.id, { includeSelf, includeTaken });
-
-    // ถ้ากลับมาว่าง และอนุญาต includeSelf → ใส่ self เป็น fallback
-    if ((!arr || arr.length === 0) && includeSelf) {
-      const me = req.me;
-      return res.json({
-        ok: true,
-        data: [{ id: me.id, firstNameTh: me.firstNameTh || "ฉัน", lastNameTh: me.lastNameTh || "" }],
-        note: "FALLBACK_SELF",
-      });
-    }
-
-    return res.json({ ok: true, data: arr });
-  } catch (e) {
-    const wantSelf = String(req.query.includeSelf || "").toLowerCase() === "1" || String(req.query.includeSelf || "").toLowerCase() === "true";
-    if ((e?.code || e?.message) === "PROFILE_INCOMPLETE" && wantSelf && req?.me?.id) {
-      const me = req.me;
-      return res.json({
-        ok: true,
-        data: [{ id: me.id, firstNameTh: me.firstNameTh || "ฉัน", lastNameTh: me.lastNameTh || "" }],
-        warning: "PROFILE_INCOMPLETE",
-      });
-    }
-    return res.status(e?.status || 400).json({ ok: false, error: e?.code || e?.message || "BAD_REQUEST" });
-  }
-}
-
+    const arr = await listEligibleEvaluatees(cycleId, meId(req), {
+      includeSelf,
+      includeTaken,
+    });
+    res.json({ ok: true, data: arr });
+  }),
+];

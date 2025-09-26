@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   listOrganizationsService,
   getOrganizationService,
@@ -8,8 +10,15 @@ import {
   hardDeleteOrganizationService,
 } from "../services/organizations.service.js";
 
-export async function listOrganizationsController(req, res) {
-  try {
+const createSchema = z.object({
+  code: z.string().trim().optional(), // ว่างได้ (เราจะแปลงเป็น null/undefined ที่ service)
+  nameTh: z.string().trim().nullable().optional(),
+  nameEn: z.string().trim().nullable().optional(),
+});
+const updateSchema = createSchema;
+
+export const listOrganizationsController = [
+  asyncHandler(async (req, res) => {
     const { page, limit, q, includeDeleted, sortBy, sort } = req.query;
     const out = await listOrganizationsService({
       page,
@@ -19,55 +28,54 @@ export async function listOrganizationsController(req, res) {
       sortBy,
       sort,
     });
-    res.json({ ok: true, data: out.items, meta: out.meta });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || String(e) });
-  }
-}
+    res.json({
+      ok: true,
+      data: out.items ?? out.rows ?? out.data ?? out,
+      meta: out.meta,
+    });
+  }),
+];
 
-export async function getOrganizationController(req, res) {
-  try {
+export const getOrganizationController = [
+  asyncHandler(async (req, res) => {
     const data = await getOrganizationService({ id: req.params.id });
     res.json({ ok: true, data });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || String(e) });
-  }
-}
+  }),
+];
 
-export async function createOrganizationController(req, res) {
-  try {
-    const data = await createOrganizationService({ data: req.body || {} });
+export const createOrganizationController = [
+  asyncHandler(async (req, res) => {
+    const data = await createOrganizationService({
+      data: createSchema.parse(req.body ?? {}),
+    });
     res.status(201).json({ ok: true, data });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || String(e) });
-  }
-}
+  }),
+];
 
-export async function updateOrganizationController(req, res) {
-  try {
-    const data = await updateOrganizationService({ id: req.params.id, data: req.body || {} });
+export const updateOrganizationController = [
+  asyncHandler(async (req, res) => {
+    const data = await updateOrganizationService({
+      id: req.params.id,
+      data: updateSchema.parse(req.body ?? {}),
+    });
     res.json({ ok: true, data });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || String(e) });
-  }
-}
+  }),
+];
 
-export async function deleteOrganizationController(req, res) {
-  try {
+export const deleteOrganizationController = [
+  asyncHandler(async (req, res) => {
     const hard = req.query.hard === "1" || req.query.hard === "true";
-    const fn = hard ? hardDeleteOrganizationService : softDeleteOrganizationService;
+    const fn = hard
+      ? hardDeleteOrganizationService
+      : softDeleteOrganizationService;
     const data = await fn({ id: req.params.id });
     res.json({ ok: true, data });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || String(e) });
-  }
-}
+  }),
+];
 
-export async function restoreOrganizationController(req, res) {
-  try {
+export const restoreOrganizationController = [
+  asyncHandler(async (req, res) => {
     const data = await restoreOrganizationService({ id: req.params.id });
     res.json({ ok: true, data });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || String(e) });
-  }
-}
+  }),
+];

@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { requireAuth, requireRole, requireMe } from "../middlewares/auth.js";
 import {
   listEvalsController,
   getEvalController,
@@ -12,26 +11,28 @@ import {
   rejectEvalController,
   listEligibleController,
 } from "../controllers/evals.controller.js";
+import { requireAuth, requireMe } from "../middlewares/auth.js";
+import { canWriteEval, anyOf, allowAdmin, allowMDApproveOnly } from "../middlewares/policy.js";
 
-const router = Router();
+const r = Router();
+r.use(requireAuth, requireMe);
 
-// ต้องล็อกอินก่อนทุกเส้นทางในโมดูลนี้ และเติม req.me ให้พร้อมใช้งาน
-router.use(requireAuth, requireMe);
+// read
+r.get("/", ...listEvalsController);
+r.get("/:id", ...getEvalController);
 
-// ใส่เส้นทางเฉพาะเจาะจงก่อน เพื่อไม่ให้ชนกับ "/:id"
-router.get("/eligible/:cycleId", listEligibleController);
+// write: admin | owner | manager(same dept) ; MD(MGT) ห้าม write
+r.post("/",          canWriteEval(), ...createEvalController);
+r.patch("/:id",      canWriteEval(), ...updateEvalController);
+r.delete("/:id",     canWriteEval(), ...deleteEvalController);
+r.post("/:id/submit", canWriteEval(), ...submitEvalController);
 
-// Core CRUD
-router.get("/", listEvalsController);
-router.post("/", createEvalController);
-router.get("/:id", getEvalController);
-router.put("/:id", updateEvalController);
-router.delete("/:id", requireRole("admin", "hr"), deleteEvalController);
+// approve/reject: admin หรือ MD(MGT) เท่านั้น
+r.post("/:id/approve/manager", anyOf(allowAdmin /* service ยังเช็คว่าเป็น manager ของแบบฟอร์ม */), ...approveManagerController);
+r.post("/:id/approve/md",      anyOf(allowAdmin, allowMDApproveOnly), ...approveMDController);
+r.post("/:id/reject",          anyOf(allowAdmin, allowMDApproveOnly), ...rejectEvalController);
 
-// Workflow
-router.post("/:id/submit", submitEvalController);
-router.post("/:id/approve", approveManagerController);
-router.post("/:id/md-approve", approveMDController);
-router.post("/:id/reject", rejectEvalController);
+// eligible
+r.get("/eligible/:cycleId", ...listEligibleController);
 
-export default router;
+export default r;

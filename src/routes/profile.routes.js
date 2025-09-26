@@ -1,20 +1,11 @@
 import { Router } from "express";
-import { requireAuth } from "../middlewares/auth.js";
 import { selfUpdateProfileController } from "../controllers/profile.controller.js";
+import { requireAuth, requireMe } from "../middlewares/auth.js";
 
-const router = Router();
+const r = Router();
+r.use(requireAuth, requireMe);
 
-router.get("/", requireAuth, async (req, res) => {
-  const me =
-    req.me || req.user || req.auth?.user || req.session?.user || null;
+// ผู้ใช้แก้ไขข้อมูลตนเอง
+r.patch("/me", ...selfUpdateProfileController);
 
-  if (!me) {
-    return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
-  }
-  res.json({ ok: true, data: me });
-});
-
-router.patch("/", requireAuth, selfUpdateProfileController);
-
-export default router;
-export { router };
+export default r;

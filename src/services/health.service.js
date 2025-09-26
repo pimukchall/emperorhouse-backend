@@ -1,3 +1,3 @@
 export async function healthService() {
-  return { status: "ok", ts: new Date().toISOString() };
+  return { ok: true, status: "UP", ts: new Date().toISOString() };
 }
