@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import { prisma as defaultPrisma } from "../prisma.js";
 import { AppError } from "../utils/appError.js";
-import { ilikeContains } from "./query.util.js";
+import { ilikeContains } from "../lib/query.util.js";
 import {
   applyPrismaPagingSort,
   buildListResponse,

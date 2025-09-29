@@ -19,7 +19,6 @@ import departmentsRouter from "./routes/departments.routes.js";
 import filesRouter from "./routes/files.routes.js";
 import contactsRouter from "./routes/contacts.routes.js";
 import organizationsRouter from "./routes/organizations.routes.js";
-import profileRouter from "./routes/profile.routes.js";
 import evalsRouter from "./routes/evals.routes.js";
 import evalCyclesRouter from "./routes/eval-cycles.routes.js";
 
@@ -36,7 +35,7 @@ app.use(
 );
 
 // Logger + CORS + parsers
-app.use(httpLogger);
+// app.use(httpLogger);
 app.use(cors({ origin: env.FRONTEND_BASE_URL, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -83,10 +82,9 @@ app.use(API("/users"), usersRouter);
 app.use(API("/users/:id/departments"), userDepartmentsChildRouter);
 app.use(API("/roles"), rolesRouter);
 app.use(API("/departments"), departmentsRouter);
-app.use(API(""), filesRouter); // มี /api/profile/files/... อยู่ในไฟล์นี้
+app.use(API("/files"), filesRouter);
 app.use(API("/contacts"), contactsRouter);
 app.use(API("/organizations"), organizationsRouter);
-app.use(API("/profile"), profileRouter);
 app.use(API("/evals"), evalsRouter);
 app.use(API("/eval-cycles"), evalCyclesRouter);
 

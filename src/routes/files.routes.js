@@ -1,21 +1,34 @@
 import { Router } from "express";
+import { requireAuth } from "../middlewares/auth.js";
+import {
+  uploadAvatarSingle,
+  uploadSignatureSingle,
+} from "../middlewares/upload.js";
 import {
   uploadAvatarController,
   getAvatarFileController,
   uploadSignatureController,
   getSignatureFileController,
 } from "../controllers/files.controller.js";
-import { requireAuth } from "../middlewares/auth.js";
-import { memoryUpload } from "../middlewares/upload.js";
 
-const r = Router();
+const router = Router();
 
-// avatar (generic field: file)
-r.post("/avatar", requireAuth, memoryUpload.single("file"), ...uploadAvatarController);
-r.get("/avatar/:id", ...getAvatarFileController);
+// ---------- Avatar ----------
+router.post(
+  "/avatar",
+  requireAuth,
+  uploadAvatarSingle,
+  ...uploadAvatarController
+);
+router.get("/avatar/:id", ...getAvatarFileController);
 
-// signature (generic field: file)
-r.post("/signature", requireAuth, memoryUpload.single("file"), ...uploadSignatureController);
-r.get("/signature/:id", ...getSignatureFileController);
+// ---------- Signature ----------
+router.post(
+  "/signature",
+  requireAuth,
+  uploadSignatureSingle,
+  ...uploadSignatureController
+);
+router.get("/signature/:id", ...getSignatureFileController);
 
-export default r;
+export default router;
