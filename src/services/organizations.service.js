@@ -10,39 +10,36 @@ export async function listOrganizationsService(
     page = 1,
     limit = 20,
     skip = 0,
-    sort = "createdAt",
-    order = "desc",
+    sortBy = "createdAt",
+    sort = "desc",
     q = "",
     includeDeleted = false,
   } = {},
   { prisma = defaultPrisma } = {}
 ) {
-  const where = q
-    ? {
-        AND: [
-          includeDeleted ? {} : { deletedAt: null },
-          {
-            OR: [
-              { code: { contains: q, mode: "insensitive" } },
-              { nameTh: { contains: q, mode: "insensitive" } },
-              { nameEn: { contains: q, mode: "insensitive" } },
-            ],
-          },
-        ],
-      }
-    : includeDeleted
-    ? {}
-    : { deletedAt: null };
+  const where = {
+    ...(includeDeleted ? {} : { deletedAt: null }),
+    ...(q
+      ? {
+          OR: [
+            { code: { contains: q, mode: "insensitive" } },
+            { nameTh: { contains: q, mode: "insensitive" } },
+            { nameEn: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
 
   const args = applyPrismaPagingSort(
     { where },
-    { page, limit, skip, sort, order },
+    { page, limit, skip, sortBy, sort },
     {
       sortMap: {
         createdAt: "createdAt",
         code: "code",
         nameTh: "nameTh",
         nameEn: "nameEn",
+        default: "createdAt",
       },
     }
   );
@@ -52,7 +49,14 @@ export async function listOrganizationsService(
     prisma.organization.count({ where }),
   ]);
 
-  return buildListResponse({ rows, total, page, limit });
+  return buildListResponse({
+    rows,
+    total,
+    page,
+    limit,
+    sortBy: Object.keys(args.orderBy || {})[0],
+    sort: Object.values(args.orderBy || {})[0],
+  });
 }
 
 export async function getOrganizationService({ prisma = defaultPrisma, id }) {

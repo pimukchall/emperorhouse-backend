@@ -1,43 +1,53 @@
-const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+import { toInt, normalizeSort } from "./query.util.js";
 
 /**
- * parsePaging(query, options?)
- * options.allowedSort: รายชื่อคอลัมน์ที่อนุญาตให้ sort (เช่น ["createdAt","updatedAt","name"])
- * options.defaultSort: คีย์เริ่มต้นเมื่อไม่ได้ส่งมา (เช่น "createdAt")
- * options.defaultOrder: "asc" | "desc"
+ * applyPrismaPagingSort(
+ *   baseArgs,
+ *   { page=1, limit=20, skip=0, sortBy="createdAt", sort="asc" },
+ *   { sortMap } // e.g. { id:"id", code:"code", createdAt:"createdAt" }
+ * )
  */
-export function parsePaging(query = {}, options = {}) {
-  const { allowedSort = [], defaultSort = allowedSort[0] || "createdAt", defaultOrder = "desc" } = options;
+export function applyPrismaPagingSort(
+  baseArgs = {},
+  { page = 1, limit = 20, skip = 0, sortBy = "createdAt", sort = "asc" } = {},
+  { sortMap = {} } = {}
+) {
+  const take = Math.max(1, toInt(limit, 20));         // อย่างน้อย 1
+  const p = Math.max(1, toInt(page, 1));
+  const sk = toInt(skip, 0) ?? 0;
+  const computedSkip = sk || (p - 1) * take;
 
-  const page  = clamp(parseInt(query.page ?? "1", 10) || 1, 1, 1_000_000);
-  const limit = clamp(parseInt(query.limit ?? "20", 10) || 20, 1, 100);
-  const skip  = (page - 1) * limit;
+  // map ชื่อ sortBy (จาก query) -> ฟิลด์จริงใน prisma (whitelist)
+  const field = sortMap[sortBy] || sortMap.default || "createdAt";
+  const ord = normalizeSort(sort, "asc");             // ปริยาย asc ตามสเป็ก
 
-  // sort & order (ปลอดภัยด้วย allowlist)
-  let sort = String(query.sort ?? defaultSort);
-  if (!allowedSort.includes(sort)) sort = defaultSort;
+  const out = {
+    ...baseArgs,
+    skip: computedSkip,
+    take,
+  };
 
-  let order = String(query.order ?? defaultOrder).toLowerCase();
-  if (!["asc", "desc"].includes(order)) order = defaultOrder;
+  if (field) {
+    // ✅ รูปแบบที่ตกลงกัน: { [field]: "asc" | "desc" }
+    out.orderBy = { [field]: ord };
+  }
 
-  return { page, limit, skip, sort, order };
+  return out;
 }
 
-export function buildListResponse({ rows, total, page, limit }) {
-  const pages = Math.max(1, Math.ceil((total || 0) / (limit || 1)));
-  return { ok: true, data: rows, meta: { page, limit, pages, total } };
-}
-
-/**
- * ช่วยเตรียมออปชันสำหรับ Prisma (เลือกใช้ได้)
- * prismaArgs = applyPrismaPagingSort({}, paging, { sortMap: { createdAt: "createdAt", name: "name" } })
- */
-export function applyPrismaPagingSort(prismaArgs = {}, paging, { sortMap = {} } = {}) {
-  const orderByKey = sortMap[paging.sort] || paging.sort;
+export function buildListResponse({ rows, total, page = 1, limit = 20, sortBy, sort }) {
+  const p = Math.max(1, toInt(page, 1));
+  const l = Math.max(1, toInt(limit, 20));
+  const pages = Math.max(1, Math.ceil(Number(total || 0) / l));
   return {
-    ...prismaArgs,
-    skip: paging.skip,
-    take: paging.limit,
-    orderBy: { [orderByKey]: paging.order },
+    data: rows,
+    meta: {
+      total: Number(total || 0),
+      page: p,
+      limit: l,
+      pages,
+      ...(sortBy ? { sortBy } : {}),
+      ...(sort ? { sort } : {}),
+    },
   };
 }

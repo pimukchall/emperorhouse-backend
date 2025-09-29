@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import { prisma as defaultPrisma } from "../prisma.js";
 import { AppError } from "../utils/appError.js";
-import { ilikeContains } from "../lib/query.util.js";
+import { ilikeContains } from "../utils/query.util.js";
 import {
   applyPrismaPagingSort,
   buildListResponse,
@@ -38,42 +38,31 @@ const baseInclude = {
 
 /* ========================= LIST ========================= */
 export async function listUsersService(
-  {
-    page = 1,
-    limit = 20,
-    skip = 0,
-    sort = "createdAt",
-    order = "desc",
-    q = "",
-    roleName,
-    orgId,
-  } = {},
+  { page = 1, limit = 20, skip = 0, sortBy = "createdAt", sort = "desc", q = "", roleName, orgId } = {},
   { prisma = defaultPrisma } = {}
 ) {
-  const where = {
-    AND: [
-      { deletedAt: null },
-      q
-        ? {
-            OR: [
-              { email: ilikeContains(q) },
-              { name: ilikeContains(q) },
-              { firstNameTh: ilikeContains(q) },
-              { lastNameTh: ilikeContains(q) },
-              { firstNameEn: ilikeContains(q) },
-              { lastNameEn: ilikeContains(q) },
-            ],
-          }
-        : {},
-      roleName ? { role: { name: roleName } } : {},
-      orgId ? { orgId: Number(orgId) } : {},
-    ],
-  };
+  const filters = [{ deletedAt: null }];
+  if (q) {
+    filters.push({
+      OR: [
+        { email: ilikeContains(q) },
+        { name: ilikeContains(q) },
+        { firstNameTh: ilikeContains(q) },
+        { lastNameTh: ilikeContains(q) },
+        { firstNameEn: ilikeContains(q) },
+        { lastNameEn: ilikeContains(q) },
+      ],
+    });
+  }
+  if (roleName) filters.push({ role: { name: roleName } });
+  if (orgId) filters.push({ orgId: Number(orgId) });
+
+  const where = filters.length ? { AND: filters } : {};
 
   const args = applyPrismaPagingSort(
     { where, include: baseInclude },
-    { page, limit, skip, sort, order },
-    { sortMap: { createdAt: "createdAt", email: "email", name: "name" } }
+    { page, limit, skip, sortBy, sort },
+    { sortMap: { createdAt: "createdAt", email: "email", name: "name", default: "createdAt" } }
   );
 
   const [rows, total] = await Promise.all([
@@ -81,7 +70,14 @@ export async function listUsersService(
     prisma.user.count({ where }),
   ]);
 
-  return buildListResponse({ rows, total, page, limit });
+  return buildListResponse({
+    rows,
+    total,
+    page,
+    limit,
+    sortBy: Object.keys(args.orderBy || {})[0],
+    sort: Object.values(args.orderBy || {})[0],
+  });
 }
 
 /* ========================= GET ONE ========================= */

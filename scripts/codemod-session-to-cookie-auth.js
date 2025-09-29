@@ -1,11 +1,3 @@
-// scripts/codemod-session-to-cookie-auth.js
-// Node >=16
-// ใช้แก้โค้ดทั้งโปรเจกต์ให้สอดคล้อง cookie-JWT + active assignment + session cleanup
-// - แปลงการอ่าน userId จาก req.session → req.user/req.userId/req.auth.sub
-// - เพิ่ม isActive:true คู่กับ endedAt:null
-// - ทำ clearCookie sameSite:"none" (ถ้าพบ pattern ทั่วไป)
-// - กัน break ไฟล์ static/3rd-party
-
 import fs from "fs";
 import path from "path";
 
