@@ -182,9 +182,6 @@ prisma/
   "db:push:dev":       "dotenv -e .env.development -- prisma db push",
   "db:reset:dev":      "dotenv -e .env.development -- prisma migrate reset --force",
   "db:seed:dev":       "dotenv -e .env.development -- node prisma/seed.js",
-
-  "test": "vitest",
-  "test:run": "vitest run"
 }
 ```
 
