@@ -67,17 +67,14 @@ export async function saveSignatureService(
   if (!fileBuffer) throw AppError.badRequest("กรุณาเลือกไฟล์");
   if (fileBuffer.length > maxSize) throw AppError.badRequest("ไฟล์ใหญ่เกินกำหนด");
 
-  ensureUploadDirs();
-
-  const { rel } = await writePngToUserFolder({
-    buffer: fileBuffer,
-    baseDir: SIGNATURE_BASE,
-    userId,
-    filename: "signature.png",
+  // เก็บลงคอลัมน์ Bytes โดยตรง
+  await prisma.user.update({
+    where: { id: Number(userId) },
+    data: { signature: fileBuffer },
   });
 
-  await prisma.user.update({ where: { id: userId }, data: { signaturePath: rel } });
-  return { path: rel, url: `/api/files/signature/${userId}` };
+  // URL เดิมยังใช้ได้เหมือนเดิม
+  return { url: `/api/files/signature/${userId}` };
 }
 
 export async function getSignatureBytesService(
@@ -86,11 +83,11 @@ export async function getSignatureBytesService(
 ) {
   const u = await prisma.user.findUnique({
     where: { id: Number(userId) },
-    select: { signaturePath: true },
+    select: { signature: true },
   });
-  const rel = u?.signaturePath;
-  if (!rel) throw AppError.notFound("ไม่พบลายเซ็น");
-  const abs = path.join(UPLOADS_BASE, rel);
-  if (!fs.existsSync(abs)) throw AppError.notFound("ไม่พบไฟล์");
-  return fs.promises.readFile(abs);
+  const bytes = u?.signature;
+  if (!bytes) throw AppError.notFound("ไม่พบลายเซ็น");
+
+  // prisma คืนมาเป็น Buffer อยู่แล้ว (MySQL: LONGBLOB)
+  return bytes; // คืน Buffer ให้ controller ส่งเป็น image/png
 }
