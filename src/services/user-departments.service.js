@@ -1,4 +1,4 @@
-import { prisma as defaultPrisma } from "../prisma.js";
+import { prisma as defaultPrisma } from "../lib/prisma.js";
 import { AppError } from "../utils/appError.js";
 
 const LEVELS = ["STAF", "SVR", "ASST", "MANAGER", "MD"];

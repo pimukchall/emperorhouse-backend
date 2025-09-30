@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { computeScores } from "./lib/score.js";
+import { computeScores } from "./score.js";
 
 const base = new PrismaClient({ log: ["query", "info", "warn", "error"] });
 

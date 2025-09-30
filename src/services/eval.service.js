@@ -1,4 +1,4 @@
-import { prisma } from "../prisma.js";
+import { prisma } from "../lib/prisma.js";
 import { err } from "../lib/errors.js";
 import { computeScores } from "../lib/score.js";
 import { isAdmin, isMD } from "../utils/roles.js";

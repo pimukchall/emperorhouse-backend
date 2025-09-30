@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { prisma } from "../prisma.js";
+import { prisma } from "../lib/prisma.js";
 import { UPLOADS_BASE, AVATAR_BASE, SIGNATURE_BASE } from "../lib/paths.js";
 
 function ensureDir(p) { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); }

@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { prisma as defaultPrisma } from "../prisma.js";
+import { prisma as defaultPrisma } from "../lib/prisma.js";
 import {
   signAccessToken,
   signRefreshToken,

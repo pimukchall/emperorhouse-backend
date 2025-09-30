@@ -1,4 +1,4 @@
-import { prisma } from "../prisma.js";
+import { prisma } from "../lib/prisma.js";
 import { LevelRankMap } from "../utils/roles.js";
 
 // ===== Config =====

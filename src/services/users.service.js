@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { prisma as defaultPrisma } from "../prisma.js";
+import { prisma as defaultPrisma } from "../lib/prisma.js";
 import { AppError } from "../utils/appError.js";
 import { ilikeContains } from "../utils/query.util.js";
 import {
