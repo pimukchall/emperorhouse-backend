@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
-import { env } from "../config/env.js";
+import { env } from "#config/env.js";
 
 const PROJECT_ROOT = process.cwd();
 const ENV_UPLOADS = env.UPLOAD_BASE_DIR;

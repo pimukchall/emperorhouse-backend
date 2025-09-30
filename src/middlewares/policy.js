@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma.js";
-import { LevelRankMap } from "../utils/roles.js";
+import { LevelRankMap } from "#utils/roles.js";
 
 // ===== Config =====
 const MGT_CODE = "MGT"; // MD ต้องสังกัดแผนกนี้เท่านั้น

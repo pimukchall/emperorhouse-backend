@@ -4,25 +4,25 @@ import cookieParser from "cookie-parser";
 
 import helmet from "helmet";
 
-import { env } from "./config/env.js";
-import { httpLogger } from "./lib/logger.js";
-import { ensureUploadDirs, UPLOADS_BASE } from "./lib/paths.js";
-import { notFound, errorHandler } from "./middlewares/error.js";
+import { env } from "#config/env.js";
+import { httpLogger } from "#lib/logger.js";
+import { ensureUploadDirs, UPLOADS_BASE } from "#lib/paths.js";
+import { notFound, errorHandler } from "#mw/error.js";
 import swaggerUi from "swagger-ui-express";
 import path from "node:path";
 import fs from "node:fs";
 
 // routes (mount ใต้ /api)
-import authRouter from "./routes/auth.routes.js";
-import usersRouter from "./routes/users.routes.js";
-import userDepartmentsChildRouter from "./routes/user-departments.routes.js";
-import rolesRouter from "./routes/roles.routes.js";
-import departmentsRouter from "./routes/departments.routes.js";
-import filesRouter from "./routes/files.routes.js";
-import contactsRouter from "./routes/contacts.routes.js";
-import organizationsRouter from "./routes/organizations.routes.js";
-import evalsRouter from "./routes/evals.routes.js";
-import evalCyclesRouter from "./routes/eval-cycles.routes.js";
+import authRouter from "#modules/auth/routes.js";
+import usersRouter from "#modules/users/routes.js";
+import userDepartmentsChildRouter from "#modules/user-departments/routes.js";
+import rolesRouter from "#modules/roles/routes.js";
+import departmentsRouter from "#modules/departments/routes.js";
+import filesRouter from "#modules/files/routes.js";
+import contactsRouter from "#modules/contacts/routes.js";
+import organizationsRouter from "#modules/organizations/routes.js";
+import evalsRouter from "#modules/evals/routes.js";
+import evalCyclesRouter from "#modules/eval-cycles/routes.js";
 
 export const app = express();
 const IS_PROD = env.NODE_ENV === "production";

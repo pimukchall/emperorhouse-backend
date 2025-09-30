@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
-import { prisma } from "../lib/prisma.js";
-import { env } from "../config/env.js";
+import { prisma } from "#lib/prisma.js";
+import { env } from "#config/env.js";
 
 /* -------- helpers: read/verify token ---------- */
 function readBearer(req) {

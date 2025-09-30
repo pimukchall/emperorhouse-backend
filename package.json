@@ -2,26 +2,49 @@
   "name": "emperorhouse-backend",
   "version": "0.1.0",
   "description": "",
-  "main": "index.js",
+  "author": "Pimuk Artharnnarong",
+  "license": "ISC",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "imports": {
+    "#lib/*": "./src/lib/*",
+    "#mw/*": "./src/middlewares/*",
+    "#utils/*": "./src/utils/*",
+    "#modules/*": "./src/modules/*",
+    "#config/*": "./src/config/*"
+  },
   "scripts": {
     "dev": "dotenv -e .env.development -- nodemon src/server.js",
     "start": "dotenv -e .env.production -- node src/server.js",
     "start:system": "node src/server.js",
-    "prisma:studio:dev": "dotenv -e .env.development -- prisma studio",
-    "prisma:studio:prod": "dotenv -e .env.production  -- prisma studio",
+
     "db:generate:dev": "dotenv -e .env.development -- prisma generate",
     "db:migrate:dev": "dotenv -e .env.development -- prisma migrate dev",
     "db:push:dev": "dotenv -e .env.development -- prisma db push",
     "db:reset:dev": "dotenv -e .env.development -- prisma migrate reset --force",
     "db:seed:dev": "dotenv -e .env.development -- node prisma/seed.js",
+
     "db:generate:prod": "dotenv -e .env.production -- prisma generate",
     "db:migrate:deploy": "dotenv -e .env.production -- prisma migrate deploy",
-    "db:seed:prod": "dotenv -e .env.production -- node prisma/seed.js"
+    "db:seed:prod": "dotenv -e .env.production -- node prisma/seed.js",
+
+    "db:check": "prisma validate",
+
+    "prisma:studio:dev": "dotenv -e .env.development -- prisma studio",
+    "prisma:studio:prod": "dotenv -e .env.production -- prisma studio",
+
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+
+    "lint": "eslint . || echo \"(no eslint configured)\"",
+    "typecheck": "node -e \"console.log('JS project – no TS typecheck')\"",
+
+    "postinstall": "prisma generate"
   },
-  "keywords": [],
-  "author": "Pimuk Artharnnarong",
-  "license": "ISC",
-  "type": "module",
   "dependencies": {
     "@prisma/client": "^6.16.2",
     "bcrypt": "^6.0.0",
@@ -36,7 +59,6 @@
     "pdf-lib": "^1.17.1",
     "pino": "^9.11.0",
     "pino-http": "^10.5.0",
-    "pino-pretty": "^13.1.1",
     "puppeteer": "^24.22.0",
     "sharp": "^0.34.3",
     "swagger-ui-express": "^5.0.1",
@@ -47,6 +69,7 @@
     "nodemon": "^3.1.10",
     "prisma": "^6.16.2",
     "supertest": "^7.1.4",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "pino-pretty": "^13.1.1"
   }
 }
