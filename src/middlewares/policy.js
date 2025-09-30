@@ -1,26 +1,39 @@
-import { prisma } from "../lib/prisma.js";
+import { prisma } from "#lib/prisma.js";
 import { LevelRankMap } from "#utils/roles.js";
 
-// ===== Config =====
-const MGT_CODE = "MGT"; // MD ต้องสังกัดแผนกนี้เท่านั้น
+const MGT_CODE = "MGT";
 
-// ===== Helpers: request identity =====
+/* ----------------- helpers (pure-ish) ----------------- */
 function getMeId(req) {
   return Number(req?.me?.id || req?.user?.id || req?.userId || req?.auth?.sub);
 }
-function isAdminReq(req) {
-  const role =
-    (req?.me?.roleName ??
+
+function getRoleName(req) {
+  return String(
+    req?.me?.roleName ??
       req?.user?.role ??
       req?.user?.roleName ??
       req?.auth?.role ??
       ""
-    ).toString().toLowerCase();
-  return role === "admin";
+  ).toLowerCase();
 }
 
-// ===== Helpers: memberships & primary dept =====
-async function getActiveMemberships(userId) {
+function isAdminReq(req) {
+  return getRoleName(req) === "admin";
+}
+
+function wantSameDept(target) {
+  return typeof target === "number"
+    ? (m) => m.deptId === Number(target)
+    : (m) => m.code === String(target || "").toUpperCase();
+}
+
+/* ----------------- cached lookups on req ----------------- */
+async function getActiveMemberships(req, userId) {
+  req._policy = req._policy || {};
+  const key = `active:${userId}`;
+  if (req._policy[key]) return req._policy[key];
+
   const rows = await prisma.userDepartment.findMany({
     where: { userId: Number(userId), isActive: true, endedAt: null },
     select: {
@@ -28,15 +41,32 @@ async function getActiveMemberships(userId) {
       department: { select: { id: true, code: true } },
     },
   });
-  return rows.map((r) => ({
-    deptId: r.department?.id ?? null,
-    code: String(r.department?.code || "").toUpperCase(),
-    level: String(r.positionLevel || "").toUpperCase(),
-    rank: LevelRankMap[String(r.positionLevel || "").toUpperCase()] ?? 0,
-  }));
+
+  const mapped = rows.map((r) => {
+    const level = String(r.positionLevel || "").toUpperCase();
+    return {
+      deptId: r.department?.id ?? null,
+      code: String(r.department?.code || "").toUpperCase(),
+      level,
+      rank: LevelRankMap[level] ?? 0,
+    };
+  });
+
+  req._policy[key] = mapped;
+  return mapped;
 }
 
-async function getPrimaryDept(userId) {
+async function getPrimaryDept(req, userId) {
+  req._policy = req._policy || {};
+
+  // ถ้ามีใน req.me อยู่แล้ว ใช้ก่อน (เร็วกว่า)
+  if (getMeId(req) === Number(userId) && req.me?.primaryDeptId) {
+    return { deptId: req.me.primaryDeptId, code: req.me.primaryDeptCode };
+  }
+
+  const key = `primary:${userId}`;
+  if (req._policy[key]) return req._policy[key];
+
   const u = await prisma.user.findUnique({
     where: { id: Number(userId) },
     select: {
@@ -45,18 +75,24 @@ async function getPrimaryDept(userId) {
       },
     },
   });
+
   const dep = u?.primaryUserDept;
-  if (!dep) return { deptId: null, code: null };
-  return {
-    deptId: dep.departmentId,
-    code: String(dep.department?.code || "").toUpperCase(),
-  };
+  const out = dep
+    ? {
+        deptId: dep.departmentId,
+        code: String(dep.department?.code || "").toUpperCase(),
+      }
+    : { deptId: null, code: null };
+
+  req._policy[key] = out;
+  return out;
 }
 
+/* ----------------- composed checks ----------------- */
 async function isMDInMGT(req) {
   const meId = getMeId(req);
   if (!meId) return false;
-  const memberships = await getActiveMemberships(meId);
+  const memberships = await getActiveMemberships(req, meId);
   return memberships.some(
     (m) => m.rank === LevelRankMap.MD && m.code === MGT_CODE
   );
@@ -65,23 +101,14 @@ async function isMDInMGT(req) {
 async function isManagerSameDept(req, targetDeptIdOrCode) {
   const meId = getMeId(req);
   if (!meId) return false;
-  const memberships = await getActiveMemberships(meId);
-  const want =
-    typeof targetDeptIdOrCode === "number"
-      ? (m) => m.deptId === Number(targetDeptIdOrCode)
-      : (m) => m.code === String(targetDeptIdOrCode || "").toUpperCase();
-
-  // Manager (>= MANAGER) แต่ไม่นับ MD (เพราะ MD มีกติกาพิเศษ)
+  const memberships = await getActiveMemberships(req, meId);
+  const want = wantSameDept(targetDeptIdOrCode);
   return memberships.some(
-    (m) =>
-      m.rank >= LevelRankMap.MANAGER &&
-      m.rank < LevelRankMap.MD &&
-      want(m)
+    (m) => m.rank >= LevelRankMap.MANAGER && m.rank < LevelRankMap.MD && want(m)
   );
 }
 
-// ===== Combiner: anyOf([...guards]) =====
-// หมายเหตุ: guards **ต้อง** เรียก next() เมื่อผ่าน และ next("route-block") เมื่อไม่ผ่าน
+/* ----------------- public guards ----------------- */
 export function anyOf(...guards) {
   return async (req, res, next) => {
     for (const g of guards) {
@@ -90,52 +117,46 @@ export function anyOf(...guards) {
         await new Promise((resolve, reject) =>
           g(req, res, (err) => (err ? reject(err) : resolve()))
         );
-        passed = true; // guard เรียก next() โดยไม่มี error
+        passed = true;
       } catch {
-        passed = false; // guard เรียก next("route-block")
+        passed = false;
       }
       if (passed) return next();
     }
-    return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+    return res
+      .status(403)
+      .json({
+        ok: false,
+        error: { code: "FORBIDDEN", message: "คุณไม่มีสิทธิ์ทำรายการนี้" },
+      });
   };
 }
 
-// ===== Generic guards =====
-
-// admin ผ่านทุกอย่าง
 export function allowAdmin(req, _res, next) {
   return isAdminReq(req) ? next() : next("route-block");
 }
 
-// MD (MGT) สำหรับสิทธิ "approve เท่านั้น" (อ่าน/อนุมัติ)
-// ห้ามใช้ guard นี้กับ endpoint ที่เป็น write/delete
 export async function allowMDApproveOnly(req, _res, next) {
   if (isAdminReq(req)) return next();
   if (await isMDInMGT(req)) return next();
   return next("route-block");
 }
 
-// อนุญาตแก้ไขเฉพาะ "ตัวเอง"
-// resolveTargetUserId: (req) => userId เป้าหมาย (default มาจาก :id)
-export function allowWriteSelfOnly(
-  resolveTargetUserId = (req) => Number(req.params.id)
-) {
+/** แก้ไข/อ่านข้อมูล “ตัวเองเท่านั้น” (admin ผ่าน, MD@MGT ถูก block) */
+export function allowWriteSelfOnly(resolveTargetUserId = (req) => Number(req.params.id)) {
   return async (req, _res, next) => {
     if (isAdminReq(req)) return next();
-    // MD: ห้ามแก้/ลบ
     if (await isMDInMGT(req)) return next("route-block");
 
     const meId = getMeId(req);
     const targetId = Number(resolveTargetUserId(req));
     if (!meId || !targetId) return next("route-block");
+
     return meId === targetId ? next() : next("route-block");
   };
 }
 
-// ===== Module-specific guards =====
-
-// Users: write ได้เมื่อเป็น admin, owner (แก้ตัวเอง), หรือ manager "แผนกเดียวกับผู้ใช้เป้าหมาย"
-// MD (MGT) ห้าม write
+/** เขียนข้อมูลผู้ใช้: owner ตัวเอง หรือ “ผู้จัดการแผนกเดียวกับเจ้าของ” (admin ผ่าน, MD@MGT ถูก block) */
 export function canWriteUser() {
   return async (req, _res, next) => {
     if (isAdminReq(req)) return next();
@@ -145,9 +166,9 @@ export function canWriteUser() {
     const targetUserId = Number(req.params.id || req.body?.userId);
     if (!meId || !targetUserId) return next("route-block");
 
-    if (meId === targetUserId) return next(); // owner
+    if (meId === targetUserId) return next();
 
-    const targetDept = await getPrimaryDept(targetUserId);
+    const targetDept = await getPrimaryDept(req, targetUserId);
     if (targetDept.deptId && (await isManagerSameDept(req, targetDept.deptId)))
       return next();
 
@@ -155,8 +176,7 @@ export function canWriteUser() {
   };
 }
 
-// User-Departments: write ได้เมื่อเป็น admin หรือ manager ของ "แผนกเป้าหมาย"
-// departmentId: จาก body หรือเดาจาก :udId
+/** เขียนความสัมพันธ์ user-department: ต้องเป็น manager ของแผนกนั้น (admin ผ่าน, MD@MGT ถูก block) */
 export function canWriteUserDepartment(
   resolveDeptId = async (req) => {
     if (req.body?.departmentId) return Number(req.body.departmentId);
@@ -182,8 +202,7 @@ export function canWriteUserDepartment(
   };
 }
 
-// Evaluations: write/submit/delete ได้เมื่อเป็น admin, owner, หรือ manager แผนกเดียวกับ owner
-// MD (MGT) ห้าม write
+/** เขียนใบประเมิน (eval): owner ตัวเอง หรือ manager แผนกเดียวกับ owner (admin ผ่าน, MD@MGT ถูก block) */
 export function canWriteEval(
   resolveOwnerId = async (req) => {
     if (req.params?.id) {
@@ -193,7 +212,6 @@ export function canWriteEval(
       });
       return ev?.ownerId ?? null;
     }
-    // create: body.ownerId || me
     return Number(req.body?.ownerId || getMeId(req));
   }
 ) {
@@ -205,9 +223,9 @@ export function canWriteEval(
     const ownerId = await resolveOwnerId(req);
     if (!ownerId) return next("route-block");
 
-    if (meId === ownerId) return next(); // owner
+    if (meId === ownerId) return next();
 
-    const ownerDept = await getPrimaryDept(ownerId);
+    const ownerDept = await getPrimaryDept(req, ownerId);
     if (ownerDept.deptId && (await isManagerSameDept(req, ownerDept.deptId)))
       return next();
 

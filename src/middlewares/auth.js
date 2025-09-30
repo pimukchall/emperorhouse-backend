@@ -1,25 +1,9 @@
-import jwt from "jsonwebtoken";
 import { prisma } from "#lib/prisma.js";
-import { env } from "#config/env.js";
-
-/* -------- helpers: read/verify token ---------- */
-function readBearer(req) {
-  const h = req.headers?.authorization || req.headers?.Authorization || "";
-  const m = /^Bearer\s+(.+)$/i.exec(h);
-  return m?.[1] || null;
-}
-function readAccessCookie(req) {
-  const c = req.cookies || {};
-  return c.access_token || c.accessToken || c.sid || c.jwt || c.token || null;
-}
-function verifyAccess(token) {
-  if (!token) return null;
-  try {
-    return jwt.verify(token, env.JWT_ACCESS_SECRET);
-  } catch {
-    return null;
-  }
-}
+import {
+  readBearer,
+  readAccessCookie,
+  verifyAccessToken,
+} from "#lib/tokens.js";
 
 /* -------- presenters ---------- */
 function buildMeFromUser(u) {
@@ -75,25 +59,35 @@ async function fetchUserSnapshot(id) {
   });
 }
 
+function unauthorized(res, msg = "กรุณาเข้าสู่ระบบ") {
+  return res.status(401).json({ ok: false, error: { code: "UNAUTHORIZED", message: msg } });
+}
+function forbidden(res, msg = "คุณไม่มีสิทธิ์ทำรายการนี้") {
+  return res.status(403).json({ ok: false, error: { code: "FORBIDDEN", message: msg } });
+}
+
 /* -------- middlewares ---------- */
 
 /** ตรวจ token พื้นฐาน → ตั้ง req.user/req.userId/req.auth */
 export async function requireAuth(req, res, next) {
+  // ถ้ามี me อยู่แล้ว (เช่น middleware ก่อนหน้าโหลดไว้) ก็ผ่านได้
   if (req?.me?.id) return next();
 
   const token = readBearer(req) || readAccessCookie(req);
-  const payload = verifyAccess(token);
+
+  let payload = null;
+  try {
+    payload = token ? verifyAccessToken(token) : null;
+  } catch {
+    // token ผิด/หมดอายุ → ถือว่าไม่ผ่าน
+    return unauthorized(res);
+  }
 
   const sessionUid =
     req.user?.id || req.userId || req.auth?.sub || req.session?.user?.id;
-  const uid = Number(payload?.sub || payload?.uid || sessionUid) || null;
 
-  if (!uid) {
-    return res.status(401).json({
-      ok: false,
-      error: { code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" },
-    });
-  }
+  const uid = Number(payload?.sub ?? payload?.uid ?? sessionUid) || null;
+  if (!uid) return unauthorized(res);
 
   req.user = { id: uid, role: payload?.role || req.session?.user?.roleName };
   req.userId = uid;
@@ -105,28 +99,17 @@ export async function requireAuth(req, res, next) {
 /** โหลด snapshot ผู้ใช้ → ตั้ง req.me และ sync session */
 export async function requireMe(req, res, next) {
   const uid = Number(req?.user?.id || req?.userId || req?.auth?.sub) || null;
-  if (!uid) {
-    return res.status(401).json({
-      ok: false,
-      error: { code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" },
-    });
-  }
+  if (!uid) return unauthorized(res);
 
-  if (req.me?.id === uid && Array.isArray(req.me.departments)) {
-    return next();
-  }
+  // มีแคชแล้วก็ข้ามได้
+  if (req.me?.id === uid && Array.isArray(req.me.departments)) return next();
 
   const u = await fetchUserSnapshot(uid);
-  if (!u) {
-    return res.status(401).json({
-      ok: false,
-      error: { code: "UNAUTHORIZED", message: "บัญชีผู้ใช้ไม่พร้อมใช้งาน" },
-    });
-  }
+  if (!u) return unauthorized(res, "บัญชีผู้ใช้ไม่พร้อมใช้งาน");
 
   req.me = buildMeFromUser(u);
 
-  // sync เข้ากับ session (เพื่อโค้ดเก่า)
+  // sync กับ session (รองรับโค้ดเก่า)
   req.session = req.session || {};
   req.session.user = {
     ...(req.session.user || {}),
@@ -151,16 +134,8 @@ export function requireRole(...roles) {
     const got = String(
       req.me?.roleName || req.user?.role || req.auth?.role || ""
     ).toLowerCase();
-    if (!got) {
-      return res.status(401).json({
-        ok: false,
-        error: { code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" },
-      });
-    }
+    if (!got) return unauthorized(res);
     if (!needs.length || needs.includes(got)) return next();
-    return res.status(403).json({
-      ok: false,
-      error: { code: "FORBIDDEN", message: "คุณไม่มีสิทธิ์ทำรายการนี้" },
-    });
+    return forbidden(res);
   };
 }

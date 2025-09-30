@@ -1,5 +1,7 @@
-import { z } from "zod";
 import { asyncHandler } from "#utils/asyncHandler.js";
+import { buildListResponse } from "#utils/pagination.js";
+import { AppError } from "#utils/appError.js";
+import * as S from "./schema.js";
 import {
   listDepartmentsService,
   getDepartmentService,
@@ -7,37 +9,36 @@ import {
   deleteDepartmentService,
 } from "./service.js";
 
-const upsertSchema = z.object({
-  id: z.number().int().positive().optional(),
-  code: z.string().min(1),
-  nameTh: z.string().min(1),
-  nameEn: z.string().nullable().optional(),
-});
-
 export const listDepartmentsController = [
   asyncHandler(async (req, res) => {
-    const { page, limit, sortBy, sort } = req.query;
-    const out = await listDepartmentsService({ page, limit, sortBy, sort });
+    const q = S.DeptListQuery.parse(req.query);
+    const out = await listDepartmentsService(q);
     res.json({
       ok: true,
-      data: out.data ?? out.rows ?? out.items ?? out,
-      meta: out.meta,
+      ...buildListResponse({
+        rows: out.rows,
+        total: out.total,
+        page: out.page,
+        limit: out.limit,
+        sortBy: out.sortBy,
+        sort: out.sort,
+      }),
     });
   }),
 ];
 
 export const getDepartmentController = [
   asyncHandler(async (req, res) => {
-    const data = await getDepartmentService({ id: req.params.id });
-    if (!data)
-      return res.status(404).json({ ok: false, error: "DEPARTMENT_NOT_FOUND" });
+    const { id } = S.DeptParams.parse(req.params);
+    const data = await getDepartmentService({ id });
+    if (!data) throw AppError.notFound("DEPARTMENT_NOT_FOUND");
     res.json({ ok: true, data });
   }),
 ];
 
 export const upsertDepartmentController = [
   asyncHandler(async (req, res) => {
-    const body = upsertSchema.parse(req.body ?? {});
+    const body = S.DeptUpsert.parse(req.body ?? {});
     const data = await upsertDepartmentService({ body });
     res.json({ ok: true, data });
   }),
@@ -45,7 +46,8 @@ export const upsertDepartmentController = [
 
 export const deleteDepartmentController = [
   asyncHandler(async (req, res) => {
-    const data = await deleteDepartmentService({ id: req.params.id });
+    const { id } = S.DeptParams.parse(req.params);
+    const data = await deleteDepartmentService({ id });
     res.json({ ok: true, data });
   }),
 ];

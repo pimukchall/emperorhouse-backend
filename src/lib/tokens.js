@@ -7,7 +7,6 @@ const REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 const ACCESS_TTL  = `${env.ACCESS_TTL_SEC}s`;
 const REFRESH_TTL = `${env.REFRESH_TTL_SEC}s`;
 
-// 👉 ใช้ path เฉพาะ /api/auth/*
 const AUTH_COOKIE_PATH = "/api/auth";
 
 export function signAccessToken(payload, opts = {}) {
@@ -27,13 +26,12 @@ export function verifyRefreshToken(token) {
 export function setRefreshCookie(res, token) {
   res.cookie("refresh_token", token, {
     httpOnly: true,
-    sameSite: "lax",                     
+    sameSite: "lax",
     secure: env.NODE_ENV === "production",
-    path: AUTH_COOKIE_PATH,              
+    path: AUTH_COOKIE_PATH,
     maxAge: env.REFRESH_TTL_SEC * 1000,
   });
 }
-
 export function clearRefreshCookie(res) {
   res.clearCookie("refresh_token", { path: AUTH_COOKIE_PATH });
 }

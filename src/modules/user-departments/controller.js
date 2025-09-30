@@ -1,6 +1,4 @@
-import { z } from "zod";
 import { asyncHandler } from "#utils/asyncHandler.js";
-import { validate } from "#mw/validate.js";
 import {
   assignUserToDepartmentService,
   endOrRenameAssignmentService,
@@ -10,31 +8,11 @@ import {
   setPrimaryAssignmentService,
 } from "./service.js";
 
-const assignSchema = z.object({
-  userId: z.number().int().positive(),
-  departmentId: z.number().int().positive(),
-  positionLevel: z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]),
-  positionName: z.string().trim().nullable().optional(),
-  startedAt: z.string().datetime().optional(),
-});
-const endOrRenameSchema = z.object({
-  positionName: z.string().trim().nullable().optional(),
-  endedAt: z.string().datetime().optional(),
-});
-const changeLevelSchema = z.object({
-  udId: z.number().int().positive(),
-  newLevel: z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]),
-  actorId: z.number().int().positive().nullable().optional(),
-  effectiveDate: z.string().datetime().optional(),
-  reason: z.string().trim().nullable().optional(),
-  newPositionName: z.string().trim().nullable().optional(),
-});
-
-// GET /api/user-departments/:id?activeOnly=true
+// GET /api/user-departments/:id?activeOnly=true   (id = userId)
 export const listAssignmentsController = [
   asyncHandler(async (req, res) => {
     const userId = Number(req.params.id);
-    const activeOnly = String(req.query.activeOnly || "") === "true";
+    const activeOnly = Boolean(req.query.activeOnly);
     const data = await listAssignmentsService({ userId, activeOnly });
     res.json({ ok: true, data });
   }),
@@ -44,7 +22,7 @@ export const listAssignmentsController = [
 export const listByUserController = [
   asyncHandler(async (req, res) => {
     const userId = Number(req.params.userId);
-    const activeOnly = String(req.query.activeOnly || "") === "true";
+    const activeOnly = Boolean(req.query.activeOnly);
     const data = await listAssignmentsByUser({ userId, activeOnly });
     res.json({ ok: true, data });
   }),
@@ -52,7 +30,6 @@ export const listByUserController = [
 
 // POST /api/user-departments
 export const addOrUpdateAssignmentController = [
-  validate(assignSchema),
   asyncHandler(async (req, res) => {
     const out = await assignUserToDepartmentService({ ...req.body });
     res.status(201).json({ ok: true, data: out });
@@ -61,11 +38,10 @@ export const addOrUpdateAssignmentController = [
 
 // POST /api/user-departments/change-level
 export const changeLevelController = [
-  validate(changeLevelSchema),
   asyncHandler(async (req, res) => {
     const out = await changeLevelService({
       ...req.body,
-      actorId: req.me?.id ?? null,
+      actorId: req.me?.id ?? null, // ตั้งจากผู้ที่ยิงคำสั่ง
     });
     res.json({ ok: true, data: out });
   }),
@@ -73,7 +49,6 @@ export const changeLevelController = [
 
 // PATCH /api/user-departments/:udId
 export const endOrRenameAssignmentController = [
-  validate(endOrRenameSchema),
   asyncHandler(async (req, res) => {
     const udId = Number(req.params.udId);
     const out = await endOrRenameAssignmentService({ udId, ...req.body });

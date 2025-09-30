@@ -1,93 +1,73 @@
-import { prisma } from "#lib/prisma.js";
+import { prisma as defaultPrisma } from "#lib/prisma.js";
+import { AppError } from "#utils/appError.js";
+import { applyPrismaPagingSort } from "#utils/pagination.js";
 
-/** Helpers */
-function parseDateMaybe(v) {
-  if (v === null || v === undefined || v === "") return null;
-  const d = new Date(v);
-  if (isNaN(d.getTime())) {
-    const e = new Error("วันที่ไม่ถูกต้อง");
-    e.status = 400;
-    throw e;
-  }
-  return d;
-}
+/* ---------------- helpers ---------------- */
 function validateDatesOrThrow({ openAt, closeAt, isActive }) {
   const now = new Date();
-  if (!openAt || !closeAt) {
-    const e = new Error("ไม่พบวันที่เปิด-ปิดรับการประเมิน");
-    e.status = 400;
-    throw e;
-  }
-  if (openAt >= closeAt) {
-    const e = new Error("ไม่ถูกต้อง: วันที่เปิดต้องมาก่อนวันที่ปิด");
-    e.status = 400;
-    throw e;
-  }
-  if (openAt < now || closeAt < now) {
-    const e = new Error("ไม่ถูกต้อง: วันที่เปิด-ปิด ต้องไม่ใช่วันในอดีต");
-    e.status = 400;
-    throw e;
-  }
-  if (isActive === true && closeAt < now) {
-    const e = new Error("ไม่สามารถเปิดใช้งานรอบที่หมดอายุแล้วได้");
-    e.status = 400;
-    throw e;
-  }
+  if (!openAt || !closeAt) throw AppError.badRequest("ไม่พบวันที่เปิด-ปิดรับการประเมิน");
+  if (openAt >= closeAt) throw AppError.badRequest("ไม่ถูกต้อง: วันที่เปิดต้องมาก่อนวันที่ปิด");
+  if (openAt < now || closeAt < now) throw AppError.badRequest("ไม่ถูกต้อง: วันที่เปิด-ปิด ต้องไม่ใช่วันในอดีต");
+  if (isActive === true && closeAt < now) throw AppError.badRequest("ไม่สามารถเปิดใช้งานรอบที่หมดอายุแล้วได้");
 }
 
-export async function listCyclesService({
-  page = 1,
-  limit = 50,
-  sortBy = "year",
-  sort = "desc",
-} = {}) {
-  const p = Math.max(1, Number(page) || 1);
-  const l = Math.min(200, Math.max(1, Number(limit) || 50));
-  const skip = (p - 1) * l;
-  const allowSort = new Set([
-    "id",
-    "code",
-    "year",
-    "stage",
-    "openAt",
-    "closeAt",
-    "isActive",
-    "createdAt",
-  ]);
-  const sField = allowSort.has(String(sortBy)) ? String(sortBy) : "year";
-  const sOrder = String(sort).toLowerCase() === "asc" ? "asc" : "desc";
-  const [items, total] = await Promise.all([
-    prisma.evalCycle.findMany({ orderBy: { [sField]: sOrder }, skip, take: l }),
+/* ---------------- services ---------------- */
+export async function listCyclesService(
+  { page = 1, limit = 50, sortBy = "year", sort = "desc" } = {},
+  { prisma = defaultPrisma } = {}
+) {
+  const args = applyPrismaPagingSort(
+    { where: {}, select: { id: true, code: true, year: true, stage: true, openAt: true, closeAt: true, isActive: true, isMandatory: true, createdAt: true } },
+    { page, limit, sortBy, sort },
+    {
+      sortMap: {
+        id: "id",
+        code: "code",
+        year: "year",
+        stage: "stage",
+        openAt: "openAt",
+        closeAt: "closeAt",
+        isActive: "isActive",
+        createdAt: "createdAt",
+        default: "year",
+      },
+    }
+  );
+
+  const [rows, total] = await Promise.all([
+    prisma.evalCycle.findMany(args),
     prisma.evalCycle.count(),
   ]);
+
+  const ob = args.orderBy || {};
   return {
-    items,
-    meta: { page: p, pages: Math.max(1, Math.ceil(total / l)), total },
+    rows,
+    total,
+    page: args.page,
+    limit: args.take,
+    sortBy: Object.keys(ob)[0],
+    sort: Object.values(ob)[0],
   };
 }
 
-export async function getCycleService(id) {
-  const row = await prisma.evalCycle.findUnique({ where: { id: Number(id) } });
-  if (!row) {
-    const e = new Error("ไม่พบรอบการประเมิน");
-    e.status = 404;
-    throw e;
-  }
+export async function getCycleService({ id }, { prisma = defaultPrisma } = {}) {
+  const cid = Number(id);
+  if (!Number.isFinite(cid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
+  const row = await prisma.evalCycle.findUnique({
+    where: { id: cid },
+    select: { id: true, code: true, year: true, stage: true, openAt: true, closeAt: true, isActive: true, isMandatory: true, createdAt: true },
+  });
+  if (!row) throw AppError.notFound("ไม่พบรอบการประเมิน");
   return row;
 }
 
-export async function createCycleService(data) {
-  const { code, year, stage } = data || {};
-  const openAt = parseDateMaybe(data?.openAt);
-  const closeAt = parseDateMaybe(data?.closeAt);
-  const isActive = data?.isActive ?? true;
-  const isMandatory = data?.isMandatory ?? true;
-  if (!code || !year || !stage) {
-    const e = new Error("ข้อมูลไม่ครบถ้วน");
-    e.status = 400;
-    throw e;
-  }
+export async function createCycleService({ data }, { prisma = defaultPrisma } = {}) {
+  const { code, year, stage, openAt, closeAt, isActive = true, isMandatory = true } = data || {};
+  if (!code || !year || !stage) throw AppError.badRequest("ข้อมูลไม่ครบถ้วน");
+
   validateDatesOrThrow({ openAt, closeAt, isActive });
+
   return prisma.evalCycle.create({
     data: {
       code: String(code).trim(),
@@ -98,38 +78,29 @@ export async function createCycleService(data) {
       isActive: Boolean(isActive),
       isMandatory: Boolean(isMandatory),
     },
+    select: { id: true, code: true, year: true, stage: true, openAt: true, closeAt: true, isActive: true, isMandatory: true, createdAt: true },
   });
 }
 
-export async function updateCycleService(id, data) {
-  const current = await prisma.evalCycle.findUnique({
-    where: { id: Number(id) },
-  });
-  if (!current) {
-    const err = new Error("ไม่พบรอบการประเมิน");
-    err.status = 404;
-    throw err;
-  }
+export async function updateCycleService({ id, data }, { prisma = defaultPrisma } = {}) {
+  const cid = Number(id);
+  if (!Number.isFinite(cid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
+  const current = await prisma.evalCycle.findUnique({ where: { id: cid } });
+  if (!current) throw AppError.notFound("ไม่พบรอบการประเมิน");
 
   const payload = {};
   if (data.code !== undefined) {
     const code = String(data.code).trim();
-    if (!code) {
-      const e = new Error("รหัสรอบการประเมินไม่ถูกต้อง");
-      e.status = 400;
-      throw e;
-    }
+    if (!code) throw AppError.badRequest("รหัสรอบการประเมินไม่ถูกต้อง");
     payload.code = code;
   }
   if (data.year !== undefined) payload.year = Number(data.year);
-  if (data.stage !== undefined)
-    payload.stage = String(data.stage).toUpperCase();
-  if (data.openAt !== undefined) payload.openAt = parseDateMaybe(data.openAt);
-  if (data.closeAt !== undefined)
-    payload.closeAt = parseDateMaybe(data.closeAt);
+  if (data.stage !== undefined) payload.stage = String(data.stage).toUpperCase();
+  if (data.openAt !== undefined) payload.openAt = data.openAt;
+  if (data.closeAt !== undefined) payload.closeAt = data.closeAt;
   if (data.isActive !== undefined) payload.isActive = Boolean(data.isActive);
-  if (data.isMandatory !== undefined)
-    payload.isMandatory = Boolean(data.isMandatory);
+  if (data.isMandatory !== undefined) payload.isMandatory = Boolean(data.isMandatory);
 
   const next = {
     openAt: payload.openAt ?? current.openAt,
@@ -138,38 +109,20 @@ export async function updateCycleService(id, data) {
   };
   validateDatesOrThrow(next);
 
-  try {
-    return await prisma.evalCycle.update({
-      where: { id: Number(id) },
-      data: payload,
-    });
-  } catch (e) {
-    if (String(e?.message || "").includes("P2025")) {
-      const err = new Error("ไม่พบรอบการประเมิน");
-      err.status = 404;
-      throw err;
-    }
-    throw e;
-  }
+  return prisma.evalCycle.update({
+    where: { id: cid },
+    data: payload,
+    select: { id: true, code: true, year: true, stage: true, openAt: true, closeAt: true, isActive: true, isMandatory: true, createdAt: true },
+  });
 }
 
-export async function deleteCycleService(id) {
-  const cycleId = Number(id);
-  const usedCount = await prisma.evaluation.count({ where: { cycleId } });
-  if (usedCount > 0) {
-    const e = new Error("ไม่สามารถลบรอบการประเมินได้ เนื่องจากมีการใช้งานอยู่");
-    e.status = 409;
-    throw e;
-  }
-  try {
-    await prisma.evalCycle.delete({ where: { id: cycleId } });
-    return { ok: true };
-  } catch (e) {
-    if (String(e?.message || "").includes("P2025")) {
-      const err = new Error("ไม่พบรอบการประเมิน");
-      err.status = 404;
-      throw err;
-    }
-    throw e;
-  }
+export async function deleteCycleService({ id }, { prisma = defaultPrisma } = {}) {
+  const cid = Number(id);
+  if (!Number.isFinite(cid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
+  const usedCount = await prisma.evaluation.count({ where: { cycleId: cid } });
+  if (usedCount > 0) throw AppError.conflict("ไม่สามารถลบรอบการประเมินได้ เนื่องจากมีการใช้งานอยู่");
+
+  await prisma.evalCycle.delete({ where: { id: cid } });
+  return { ok: true };
 }

@@ -15,7 +15,7 @@ function esc(s = "") {
 }
 function nl2br(s = "") { return String(s).replace(/\n/g, "<br>"); }
 
-// CREATE (คงเดิม)
+// ---------- CREATE ----------
 export async function submitContactService({ prisma = defaultPrisma, body }) {
   const { name, email, phone, subject, message } = body || {};
   const nm = String(name ?? "").trim();
@@ -74,7 +74,7 @@ export async function submitContactService({ prisma = defaultPrisma, body }) {
   return { id: saved.id, createdAt: saved.createdAt, mailed };
 }
 
-// LIST (ปรับใหม่)
+// ---------- LIST ----------
 export async function listContactsService({
   prisma = defaultPrisma,
   q = "",
@@ -109,5 +109,30 @@ export async function listContactsService({
     prisma.contactMessage.findMany(args),
     prisma.contactMessage.count({ where }),
   ]);
-  return buildListResponse({ rows, total, page, limit, sortBy: Object.keys(args.orderBy || {})[0], sort: Object.values(args.orderBy || {})[0] });
+  return buildListResponse({
+    rows,
+    total,
+    page,
+    limit,
+    sortBy: Object.keys(args.orderBy || {})[0],
+    sort: Object.values(args.orderBy || {})[0],
+  });
+}
+
+// ---------- GET ONE ----------
+export async function getContactService({ prisma = defaultPrisma, id }) {
+  const cid = Number(id);
+  if (!Number.isFinite(cid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+  return prisma.contactMessage.findUnique({
+    where: { id: cid },
+    select: { id: true, name: true, email: true, phone: true, subject: true, message: true, createdAt: true },
+  });
+}
+
+// ---------- DELETE ----------
+export async function deleteContactService({ prisma = defaultPrisma, id }) {
+  const cid = Number(id);
+  if (!Number.isFinite(cid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+  await prisma.contactMessage.delete({ where: { id: cid } });
+  return { ok: true };
 }

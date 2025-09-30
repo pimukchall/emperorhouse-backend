@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { requireAuth } from "#mw/auth.js";
-import {
-  uploadAvatarSingle,
-  uploadSignatureSingle,
-} from "#mw/upload.js";
+import { validate } from "#mw/validate.js";
+import { IdParam } from "./schema.js";
+import { uploadAvatarSingle, uploadSignatureSingle } from "#mw/upload.js";
 import {
   uploadAvatarController,
   getAvatarFileController,
@@ -11,24 +10,14 @@ import {
   getSignatureFileController,
 } from "./controller.js";
 
-const router = Router();
+const r = Router();
 
 // ---------- Avatar ----------
-router.post(
-  "/avatar",
-  requireAuth,
-  uploadAvatarSingle,
-  ...uploadAvatarController
-);
-router.get("/avatar/:id", ...getAvatarFileController);
+r.post("/avatar", requireAuth, uploadAvatarSingle, ...uploadAvatarController);
+r.get("/avatar/:id", validate(IdParam, "params"), ...getAvatarFileController);
 
 // ---------- Signature ----------
-router.post(
-  "/signature",
-  requireAuth,
-  uploadSignatureSingle,
-  ...uploadSignatureController
-);
-router.get("/signature/:id", ...getSignatureFileController);
+r.post("/signature", requireAuth, uploadSignatureSingle, ...uploadSignatureController);
+r.get("/signature/:id", validate(IdParam, "params"), ...getSignatureFileController);
 
-export default router;
+export default r;

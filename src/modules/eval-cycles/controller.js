@@ -1,5 +1,6 @@
-import { z } from "zod";
 import { asyncHandler } from "#utils/asyncHandler.js";
+import { buildListResponse } from "#utils/pagination.js";
+import * as S from "./schema.js";
 import {
   listCyclesService,
   getCycleService,
@@ -8,59 +9,43 @@ import {
   deleteCycleService,
 } from "./service.js";
 
-/* ---------- Schemas ---------- */
-const createSchema = z.object({
-  code: z.string().trim().min(1),
-  year: z.coerce.number().int().min(2000),
-  stage: z.enum(["MID_YEAR", "YEAR_END"]),
-  openAt: z.coerce.date(),
-  closeAt: z.coerce.date(),
-  isActive: z.coerce.boolean().optional(),
-  isMandatory: z.coerce.boolean().optional(),
-});
-const updateSchema = createSchema.partial();
-
-/* ---------- Controllers ---------- */
-
-// GET /api/eval-cycles
 export const listCyclesController = [
   asyncHandler(async (req, res) => {
-    const out = await listCyclesService(req.query || {});
-    res.json({ ok: true, data: out.items, meta: out.meta });
+    const q = S.CycleListQuery.parse(req.query);
+    const out = await listCyclesService(q);
+    res.json({ ok: true, ...buildListResponse(out) });
   }),
 ];
 
-// GET /api/eval-cycles/:id
 export const getCycleController = [
   asyncHandler(async (req, res) => {
-    const row = await getCycleService(req.params.id);
+    const { id } = S.CycleParams.parse(req.params);
+    const row = await getCycleService({ id });
     res.json({ ok: true, data: row });
   }),
 ];
 
-// POST /api/eval-cycles
 export const createCycleController = [
   asyncHandler(async (req, res) => {
-    const row = await createCycleService(createSchema.parse(req.body ?? {}));
+    const data = S.CycleCreate.parse(req.body ?? {});
+    const row = await createCycleService({ data });
     res.status(201).json({ ok: true, data: row });
   }),
 ];
 
-// PATCH /api/eval-cycles/:id
 export const updateCycleController = [
   asyncHandler(async (req, res) => {
-    const row = await updateCycleService(
-      req.params.id,
-      updateSchema.parse(req.body ?? {})
-    );
+    const { id } = S.CycleParams.parse(req.params);
+    const data = S.CycleUpdate.parse(req.body ?? {});
+    const row = await updateCycleService({ id, data });
     res.json({ ok: true, data: row });
   }),
 ];
 
-// DELETE /api/eval-cycles/:id
 export const deleteCycleController = [
   asyncHandler(async (req, res) => {
-    const out = await deleteCycleService(req.params.id);
+    const { id } = S.CycleParams.parse(req.params);
+    const out = await deleteCycleService({ id });
     res.json({ ok: true, data: out });
   }),
 ];

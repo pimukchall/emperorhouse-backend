@@ -1,45 +1,47 @@
-import { z } from "zod";
 import { asyncHandler } from "#utils/asyncHandler.js";
-import { submitContactService } from "./service.js";
+import { AppError } from "#utils/appError.js";
+import { buildListResponse } from "#utils/pagination.js";
+import * as S from "./schema.js";
+import {
+  submitContactService,
+  listContactsService,
+  getContactService,
+  deleteContactService,
+} from "./service.js";
 
-const createSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
-  phone: z.string().min(3).max(32).optional(),
-  subject: z.string().min(1),
-  message: z.string().min(1),
-});
-
+// POST /contacts  (public)
 export const createContactController = [
   asyncHandler(async (req, res) => {
-    const body = createSchema.parse(req.body ?? {});
+    const body = S.ContactCreate.parse(req.body ?? {});
     const result = await submitContactService({ body });
     res.status(201).json({ ok: true, ...result });
   }),
 ];
 
+// GET /contacts  (admin)
 export const listContactsController = [
   asyncHandler(async (req, res) => {
-    // ให้ service ทำงาน list (ถ้าคุณมี service list แล้ว)
-    // ที่เดิม controller ทำเอง เราแนะนำย้ายเข้า service เพื่อความสม่ำเสมอ
-    res
-      .status(501)
-      .json({ ok: false, error: "LIST_NOT_IMPLEMENTED_IN_SERVICE" });
+    const q = S.ContactListQuery.parse(req.query);
+    const out = await listContactsService(q);
+    res.json({ ok: true, ...buildListResponse(out) });
   }),
 ];
 
+// GET /contacts/:id  (admin)
 export const getContactController = [
   asyncHandler(async (req, res) => {
-    res
-      .status(501)
-      .json({ ok: false, error: "GET_NOT_IMPLEMENTED_IN_SERVICE" });
+    const { id } = S.ContactParams.parse(req.params);
+    const data = await getContactService({ id });
+    if (!data) throw AppError.notFound("CONTACT_NOT_FOUND");
+    res.json({ ok: true, data });
   }),
 ];
 
+// DELETE /contacts/:id  (admin)
 export const deleteContactController = [
   asyncHandler(async (req, res) => {
-    res
-      .status(501)
-      .json({ ok: false, error: "DELETE_NOT_IMPLEMENTED_IN_SERVICE" });
+    const { id } = S.ContactParams.parse(req.params);
+    const data = await deleteContactService({ id });
+    res.json({ ok: true, data });
   }),
 ];

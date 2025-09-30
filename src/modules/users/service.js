@@ -2,46 +2,45 @@ import bcrypt from "bcrypt";
 import { prisma as defaultPrisma } from "#lib/prisma.js";
 import { AppError } from "#utils/appError.js";
 import { ilikeContains } from "#utils/query.util.js";
-import {
-  applyPrismaPagingSort,
-  buildListResponse,
-} from "#utils/pagination.js";
+import { applyPrismaPagingSort } from "#utils/pagination.js";
 
-/* ============ include base (ดึงความสัมพันธ์หลัก) ============ */
+/* include พื้นฐาน */
 const baseInclude = {
   role: { select: { id: true, name: true, labelTh: true, labelEn: true } },
-  organization: {
-    select: { id: true, code: true, nameTh: true, nameEn: true },
-  },
+  organization: { select: { id: true, code: true, nameTh: true, nameEn: true } },
   primaryUserDept: {
     select: {
-      id: true,
-      positionLevel: true,
-      positionName: true,
-      department: {
-        select: { id: true, code: true, nameTh: true, nameEn: true },
-      },
+      id: true, positionLevel: true, positionName: true,
+      department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
     },
   },
   userDepartments: {
     where: { endedAt: null, isActive: true },
     select: {
-      id: true,
-      positionLevel: true,
-      positionName: true,
-      department: {
-        select: { id: true, code: true, nameTh: true, nameEn: true },
-      },
+      id: true, positionLevel: true, positionName: true,
+      department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
     },
   },
 };
 
-/* ========================= LIST ========================= */
+/* =============== LIST =============== */
 export async function listUsersService(
-  { page = 1, limit = 20, skip = 0, sortBy = "createdAt", sort = "desc", q = "", roleName, orgId } = {},
+  {
+    page = 1,
+    limit = 20,
+    skip = 0,
+    sortBy = "createdAt",
+    sort = "desc",
+    q = "",
+    includeDeleted = false,
+    roleId,
+    orgId,
+    departmentId,
+  } = {},
   { prisma = defaultPrisma } = {}
 ) {
-  const filters = [{ deletedAt: null }];
+  const filters = [];
+  if (!includeDeleted) filters.push({ deletedAt: null });
   if (q) {
     filters.push({
       OR: [
@@ -54,11 +53,17 @@ export async function listUsersService(
       ],
     });
   }
-  if (roleName) filters.push({ role: { name: roleName } });
+  if (roleId) filters.push({ roleId: Number(roleId) });
   if (orgId) filters.push({ orgId: Number(orgId) });
+  if (departmentId) {
+    filters.push({
+      userDepartments: {
+        some: { departmentId: Number(departmentId), endedAt: null, isActive: true },
+      },
+    });
+  }
 
   const where = filters.length ? { AND: filters } : {};
-
   const args = applyPrismaPagingSort(
     { where, include: baseInclude },
     { page, limit, skip, sortBy, sort },
@@ -70,31 +75,29 @@ export async function listUsersService(
     prisma.user.count({ where }),
   ]);
 
-  return buildListResponse({
+  const ob = args.orderBy || {};
+  return {
     rows,
     total,
     page,
     limit,
-    sortBy: Object.keys(args.orderBy || {})[0],
-    sort: Object.values(args.orderBy || {})[0],
-  });
+    sortBy: Object.keys(ob)[0],
+    sort: Object.values(ob)[0],
+  };
 }
 
-/* ========================= GET ONE ========================= */
+/* =============== GET ONE =============== */
 export async function getUserService({ prisma = defaultPrisma, id }) {
-  const user = await prisma.user.findUnique({
-    where: { id: Number(id) },
-    include: baseInclude,
-  });
+  const uid = Number(id);
+  if (!Number.isFinite(uid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+  const user = await prisma.user.findUnique({ where: { id: uid }, include: baseInclude });
   if (!user) throw AppError.notFound("ไม่พบผู้ใช้งาน");
   return user;
 }
 
-/* ========================= CREATE ========================= */
+/* =============== CREATE =============== */
 export async function createUserService({ prisma = defaultPrisma, data }) {
-  const email = String(data?.email || "")
-    .trim()
-    .toLowerCase();
+  const email = String(data?.email || "").trim().toLowerCase();
   if (!email) throw AppError.badRequest("ต้องระบุอีเมล");
 
   const dup = await prisma.user.findFirst({ where: { email } });
@@ -103,17 +106,13 @@ export async function createUserService({ prisma = defaultPrisma, data }) {
   const password = String(data?.password || "").trim() || "Emp@123456";
   const passwordHash = await bcrypt.hash(password, 10);
 
-  const created = await prisma.user.create({
+  return prisma.user.create({
     data: {
       email,
       name: data?.name || "",
       passwordHash,
-      role: data?.roleId
-        ? { connect: { id: Number(data.roleId) } }
-        : { connect: { name: "user" } },
-      organization: data?.orgId
-        ? { connect: { id: Number(data.orgId) } }
-        : undefined,
+      role: data?.roleId ? { connect: { id: Number(data.roleId) } } : { connect: { name: "user" } },
+      organization: data?.orgId ? { connect: { id: Number(data.orgId) } } : undefined,
       firstNameTh: data?.firstNameTh ?? "",
       lastNameTh: data?.lastNameTh ?? "",
       firstNameEn: data?.firstNameEn ?? "",
@@ -123,92 +122,70 @@ export async function createUserService({ prisma = defaultPrisma, data }) {
     },
     include: baseInclude,
   });
-
-  return created;
 }
 
-/* ========================= UPDATE ========================= */
+/* =============== UPDATE =============== */
 export async function updateUserService({ prisma = defaultPrisma, id, data }) {
+  const uid = Number(id);
+  if (!Number.isFinite(uid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
   const fields = [
-    "name",
-    "firstNameTh",
-    "lastNameTh",
-    "firstNameEn",
-    "lastNameEn",
-    "employeeCode",
-    "employeeType",
-    "contractType",
-    "avatarPath",
+    "name", "firstNameTh", "lastNameTh", "firstNameEn", "lastNameEn",
+    "employeeCode", "employeeType", "contractType", "avatarPath",
   ];
   const out = {};
 
   for (const k of fields) {
     if (data[k] !== undefined) out[k] = data[k] === "" ? null : data[k];
   }
-  if (data.birthDate !== undefined)
-    out.birthDate = data.birthDate ? new Date(data.birthDate) : null;
+  if (data.birthDate !== undefined) out.birthDate = data.birthDate ? new Date(data.birthDate) : null;
   if (data.gender !== undefined) out.gender = data.gender ?? null;
 
   if (data.roleId !== undefined) {
-    out.role = data.roleId
-      ? { connect: { id: Number(data.roleId) } }
-      : undefined;
+    out.role = data.roleId ? { connect: { id: Number(data.roleId) } } : undefined;
   }
   if (data.orgId !== undefined) {
-    const orgId = Number(data.orgId);
-    if (!orgId || data.orgId === 0 || data.orgId === "0") {
-      out.organization = { disconnect: true };
-    } else {
-      out.organization = { connect: { id: orgId } };
-    }
+    const v = data.orgId;
+    if (!v || v === 0 || v === "0") out.organization = { disconnect: true };
+    else out.organization = { connect: { id: Number(v) } };
   }
 
-  const updated = await prisma.user.update({
-    where: { id: Number(id) },
-    data: out,
-    include: baseInclude,
-  });
-
-  return updated;
+  return prisma.user.update({ where: { id: uid }, data: out, include: baseInclude });
 }
 
-/* ========================= SOFT DELETE & RESTORE ========================= */
-export async function softDeleteUserService({
-  prisma = defaultPrisma,
-  id,
-  hard = false,
-}) {
+/* =============== SOFT/HARD DELETE & RESTORE =============== */
+export async function softDeleteUserService({ prisma = defaultPrisma, id, hard = false }) {
+  const uid = Number(id);
+  if (!Number.isFinite(uid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
   if (hard) {
-    await prisma.userDepartment
-      .deleteMany({ where: { userId: Number(id) } })
-      .catch(() => {});
-    await prisma.user.delete({ where: { id: Number(id) } });
+    await prisma.userDepartment.deleteMany({ where: { userId: uid } }).catch(() => {});
+    await prisma.user.delete({ where: { id: uid } });
     return { ok: true };
   }
-  const rec = await prisma.user.update({
-    where: { id: Number(id) },
+  return prisma.user.update({
+    where: { id: uid },
     data: { deletedAt: new Date() },
     include: baseInclude,
   });
-  return rec;
 }
 
 export async function restoreUserService({ prisma = defaultPrisma, id }) {
+  const uid = Number(id);
+  if (!Number.isFinite(uid)) throw AppError.badRequest("id ไม่ถูกต้อง");
   return prisma.user.update({
-    where: { id: Number(id) },
+    where: { id: uid },
     data: { deletedAt: null },
     include: baseInclude,
   });
 }
 
-/* ========================= SET PRIMARY DEPARTMENT ========================= */
-export async function setPrimaryDepartmentService({
-  prisma = defaultPrisma,
-  userId,
-  departmentId,
-}) {
+/* =============== SET PRIMARY DEPARTMENT =============== */
+export async function setPrimaryDepartmentService({ prisma = defaultPrisma, userId, departmentId }) {
   const uid = Number(userId);
   const did = Number(departmentId);
+  if (!Number.isFinite(uid) || !Number.isFinite(did)) throw AppError.badRequest("ข้อมูลไม่ถูกต้อง");
+
   const user = await prisma.user.findUnique({ where: { id: uid } });
   if (!user) throw AppError.notFound("ไม่พบผู้ใช้งาน");
 
@@ -232,44 +209,28 @@ export async function setPrimaryDepartmentService({
     });
   }
 
-  await prisma.user.update({
-    where: { id: uid },
-    data: { primaryUserDeptId: ud.id },
-  });
+  await prisma.user.update({ where: { id: uid }, data: { primaryUserDeptId: ud.id } });
   return prisma.user.findUnique({ where: { id: uid }, include: baseInclude });
 }
 
-/* ========================= SELF UPDATE PROFILE ========================= */
-export async function selfUpdateProfileService({
-  prisma = defaultPrisma,
-  userId,
-  data,
-}) {
-  const user = await prisma.user.findUnique({ where: { id: Number(userId) } });
+/* =============== SELF UPDATE PROFILE =============== */
+export async function selfUpdateProfileService({ prisma = defaultPrisma, userId, data }) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
+  const user = await prisma.user.findUnique({ where: { id: uid } });
   if (!user) throw AppError.notFound("ไม่พบผู้ใช้งาน");
 
-  const allowed = [
-    "name",
-    "firstNameTh",
-    "lastNameTh",
-    "firstNameEn",
-    "lastNameEn",
-    "birthDate",
-    "gender",
-    "avatarPath",
-    "signature",
-  ];
+  const allowed = ["name","firstNameTh","lastNameTh","firstNameEn","lastNameEn","birthDate","gender","avatarPath","signature"];
   const out = { updatedAt: new Date() };
   for (const key of allowed) {
     if (data[key] !== undefined) {
-      if (key === "birthDate")
-        out[key] = data[key] ? new Date(data[key]) : null;
-      else if (key === "avatarPath")
-        out[key] = data[key] === "" ? null : data[key];
+      if (key === "birthDate") out[key] = data[key] ? new Date(data[key]) : null;
+      else if (key === "avatarPath") out[key] = data[key] === "" ? null : data[key];
       else out[key] = data[key];
     }
   }
 
-  await prisma.user.update({ where: { id: Number(userId) }, data: out });
+  await prisma.user.update({ where: { id: uid }, data: out });
   return { ok: true };
 }

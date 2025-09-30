@@ -5,19 +5,24 @@ export async function listRolesService({ prisma = defaultPrisma } = {}) {
   return prisma.role.findMany({ orderBy: [{ id: "asc" }] });
 }
 
-export async function getRoleService({ prisma = defaultPrisma, id }) {
-  return prisma.role.findUnique({ where: { id: Number(id) } });
+export async function getRoleService({ id, prisma = defaultPrisma }) {
+  // รองรับทั้ง id (เลข) และ name (string)
+  const asNum = Number(id);
+  const where =
+    Number.isFinite(asNum) && `${asNum}` === String(id)
+      ? { id: asNum }
+      : { name: String(id).trim().toLowerCase() };
+
+  return prisma.role.findUnique({ where });
 }
 
-export async function upsertRoleService({ prisma = defaultPrisma, body }) {
-  const nameKey = String(body?.name || "")
-    .trim()
-    .toLowerCase();
+export async function upsertRoleService({ body, prisma = defaultPrisma }) {
+  const nameKey = String(body?.name || "").trim().toLowerCase();
   if (!nameKey) throw AppError.badRequest("กรุณาระบุชื่อสิทธิ์");
 
-  // กันชื่อเฉพาะระบบ
+  // กันชื่อสงวน หากต้องการ (ขยายตามนโยบายทีมได้)
   if (!["admin", "user"].includes(nameKey)) {
-    // ถ้ามีชื่ออื่น ๆ ก็ยังอนุญาตได้หากโปรเจ็กต์ต้องการ
+    // allow others by business rule
   }
 
   return prisma.role.upsert({
@@ -34,11 +39,17 @@ export async function upsertRoleService({ prisma = defaultPrisma, body }) {
   });
 }
 
-export async function deleteRoleService({ prisma = defaultPrisma, id }) {
+export async function deleteRoleService({ id, prisma = defaultPrisma }) {
   const rid = Number(id);
+  if (!Number.isFinite(rid)) {
+    throw AppError.badRequest("id ไม่ถูกต้อง");
+  }
+
   const inUse = await prisma.user.count({ where: { roleId: rid } });
-  if (inUse > 0)
+  if (inUse > 0) {
     throw AppError.conflict("มีผู้ใช้งานสิทธิ์นี้อยู่ ไม่สามารถลบได้");
+  }
+
   await prisma.role.delete({ where: { id: rid } });
   return { ok: true };
 }

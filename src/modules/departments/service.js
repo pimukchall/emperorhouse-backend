@@ -1,6 +1,8 @@
 import { prisma as defaultPrisma } from "#lib/prisma.js";
 import { AppError } from "#utils/appError.js";
-import { applyPrismaPagingSort, buildListResponse } from "#utils/pagination.js";
+import { applyPrismaPagingSort } from "#utils/pagination.js";
+
+const SELECT = { id: true, code: true, nameTh: true, nameEn: true, createdAt: true, updatedAt: true };
 
 export async function listDepartmentsService(
   { page = 1, limit = 20, skip = 0, sortBy = "code", sort = "asc", q = "" } = {},
@@ -20,9 +22,19 @@ export async function listDepartmentsService(
   };
 
   const args = applyPrismaPagingSort(
-    { where, select: { id: true, code: true, nameTh: true, nameEn: true, createdAt: true, updatedAt: true } },
+    { where, select: SELECT },
     { page, limit, skip, sortBy, sort },
-    { sortMap: { id: "id", code: "code", nameTh: "nameTh", nameEn: "nameEn", createdAt: "createdAt", updatedAt: "updatedAt", default: "code" } }
+    {
+      sortMap: {
+        id: "id",
+        code: "code",
+        nameTh: "nameTh",
+        nameEn: "nameEn",
+        createdAt: "createdAt",
+        updatedAt: "updatedAt",
+        default: "code",
+      },
+    }
   );
 
   const [rows, total] = await Promise.all([
@@ -30,34 +42,52 @@ export async function listDepartmentsService(
     prisma.department.count({ where }),
   ]);
 
-  return buildListResponse({
+  const ob = args.orderBy || {};
+  return {
     rows,
     total,
     page,
     limit,
-    sortBy: Object.keys(args.orderBy || {})[0],
-    sort: Object.values(args.orderBy || {})[0],
-  });
+    sortBy: Object.keys(ob)[0],
+    sort: Object.values(ob)[0],
+  };
 }
 
 export async function getDepartmentService({ prisma = defaultPrisma, id }) {
-  return prisma.department.findUnique({ where: { id: Number(id) } });
+  const did = Number(id);
+  if (!Number.isFinite(did)) throw AppError.badRequest("id ไม่ถูกต้อง");
+  return prisma.department.findUnique({ where: { id: did }, select: SELECT });
 }
 
 export async function upsertDepartmentService({ prisma = defaultPrisma, body }) {
   let { code, nameTh, nameEn } = body || {};
-  code = String(code || "").trim().toUpperCase();
-  if (!code || !nameTh || !nameEn) throw AppError.badRequest("ต้องระบุ code, nameTh, nameEn");
+  const codeStr = String(code || "").trim().toUpperCase();
+  if (!codeStr || !nameTh) throw AppError.badRequest("ต้องระบุ code และ nameTh");
+
   return prisma.department.upsert({
-    where: { code },
-    update: { nameTh, nameEn },
-    create: { code, nameTh, nameEn },
+    where: { code: codeStr },
+    update: {
+      nameTh,
+      nameEn: typeof nameEn === "undefined" ? undefined : (nameEn || null),
+    },
+    create: {
+      code: codeStr,
+      nameTh,
+      nameEn: nameEn || null,
+    },
+    select: SELECT,
   });
 }
 
 export async function deleteDepartmentService({ prisma = defaultPrisma, id }) {
-  const inUse = await prisma.userDepartment.count({ where: { departmentId: Number(id), endedAt: null, isActive: true } });
+  const did = Number(id);
+  if (!Number.isFinite(did)) throw AppError.badRequest("id ไม่ถูกต้อง");
+
+  const inUse = await prisma.userDepartment.count({
+    where: { departmentId: did, endedAt: null, isActive: true },
+  });
   if (inUse > 0) throw AppError.conflict("ไม่สามารถลบแผนกที่มีพนักงานอยู่ได้");
-  await prisma.department.delete({ where: { id: Number(id) } });
+
+  await prisma.department.delete({ where: { id: did } });
   return { ok: true };
 }

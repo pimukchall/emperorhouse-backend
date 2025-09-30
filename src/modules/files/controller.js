@@ -21,9 +21,7 @@ export const uploadAvatarController = [
 // GET /api/files/avatar/:id
 export const getAvatarFileController = [
   asyncHandler(async (req, res) => {
-    const abs = await getAvatarFilePathService({
-      userId: Number(req.params.id),
-    });
+    const abs = await getAvatarFilePathService({ userId: Number(req.params.id) });
     res.sendFile(abs);
   }),
 ];
@@ -43,9 +41,7 @@ export const uploadSignatureController = [
 // GET /api/files/signature/:id
 export const getSignatureFileController = [
   asyncHandler(async (req, res) => {
-    const bytes = await getSignatureBytesService({
-      userId: Number(req.params.id),
-    });
+    const bytes = await getSignatureBytesService({ userId: Number(req.params.id) });
     res.setHeader("Content-Type", "image/png");
     res.send(bytes);
   }),

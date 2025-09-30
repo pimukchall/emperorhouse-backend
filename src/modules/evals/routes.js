@@ -13,26 +13,28 @@ import {
 } from "./controller.js";
 import { requireAuth, requireMe } from "#mw/auth.js";
 import { canWriteEval, anyOf, allowAdmin, allowMDApproveOnly } from "#mw/policy.js";
+import { validate } from "#mw/validate.js";
+import * as S from "./schema.js";
 
 const r = Router();
 r.use(requireAuth, requireMe);
 
 // read
-r.get("/", ...listEvalsController);
-r.get("/:id", ...getEvalController);
+r.get("/", validate(S.ListQuery, "query"), ...listEvalsController);
+r.get("/:id", validate(S.IdParam, "params"), ...getEvalController);
 
 // write: admin | owner | manager(same dept) ; MD(MGT) ห้าม write
-r.post("/",          canWriteEval(), ...createEvalController);
-r.patch("/:id",      canWriteEval(), ...updateEvalController);
-r.delete("/:id",     canWriteEval(), ...deleteEvalController);
-r.post("/:id/submit", canWriteEval(), ...submitEvalController);
+r.post("/", canWriteEval(), validate(S.Create), ...createEvalController);
+r.patch("/:id", canWriteEval(), validate(S.IdParam, "params"), validate(S.Update), ...updateEvalController);
+r.delete("/:id", canWriteEval(), validate(S.IdParam, "params"), ...deleteEvalController);
+r.post("/:id/submit", canWriteEval(), validate(S.IdParam, "params"), validate(S.SignBody), ...submitEvalController);
 
 // approve/reject: admin หรือ MD(MGT) เท่านั้น
-r.post("/:id/approve/manager", anyOf(allowAdmin /* service ยังเช็คว่าเป็น manager ของแบบฟอร์ม */), ...approveManagerController);
-r.post("/:id/approve/md",      anyOf(allowAdmin, allowMDApproveOnly), ...approveMDController);
-r.post("/:id/reject",          anyOf(allowAdmin, allowMDApproveOnly), ...rejectEvalController);
+r.post("/:id/approve/manager", anyOf(allowAdmin /* service จะเช็คเพิ่มเติมว่าเป็น manager เจ้าของแบบฟอร์ม */), validate(S.IdParam, "params"), validate(S.SignBody), ...approveManagerController);
+r.post("/:id/approve/md",      anyOf(allowAdmin, allowMDApproveOnly), validate(S.IdParam, "params"), validate(S.SignBody), ...approveMDController);
+r.post("/:id/reject",          anyOf(allowAdmin, allowMDApproveOnly), validate(S.IdParam, "params"), ...rejectEvalController);
 
 // eligible
-r.get("/eligible/:cycleId", ...listEligibleController);
+r.get("/eligible/:cycleId", validate(S.CycleParam, "params"), ...listEligibleController);
 
 export default r;

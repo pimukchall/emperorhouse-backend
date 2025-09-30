@@ -1,49 +1,35 @@
-import { prisma } from "#lib/prisma.js";
-import { err } from "#lib/errors.js";
+import { prisma as defaultPrisma } from "#lib/prisma.js";
+import { AppError } from "#utils/appError.js";
 import { computeScores } from "#lib/score.js";
-import { isAdmin, isMD } from "#utils/roles.js";
 
+/* ------------ rank helpers ------------ */
 const Rank = { STAF: 1, SVR: 2, ASST: 3, MANAGER: 4, MD: 5 };
 const rank = (lv) => Rank[String(lv || "").toUpperCase()] ?? -1;
 
+/* ------------ signature helpers ------------ */
 function toBuffer(sig) {
   if (!sig) return null;
   if (Buffer.isBuffer(sig)) return sig;
   const s = String(sig);
   const b64 = s.startsWith("data:") ? s.replace(/^data:.*;base64,/, "") : s;
-  try {
-    return Buffer.from(b64, "base64");
-  } catch {
-    return null;
-  }
+  try { return Buffer.from(b64, "base64"); } catch { return null; }
 }
 function requireSignature(sig) {
   const buf = toBuffer(sig);
-  if (!buf || buf.length < 16) throw err(400, "ต้องมีลายเซ็น");
+  if (!buf || buf.length < 16) throw AppError.badRequest("ต้องมีลายเซ็น");
   return buf;
 }
 
-function isPrivileged(me) {
-  const role = (me?.roleName || "").toLowerCase();
-  if (role === "admin" || role === "hr") return true;
-  const hasMDLevel =
-    (me?.primaryLevel && String(me.primaryLevel).toUpperCase() === "MD") ||
-    (Array.isArray(me?.memberships) &&
-      me.memberships.some(
-        (m) => String(m?.level || "").toUpperCase() === "MD"
-      ));
-  return hasMDLevel;
-}
-
-async function getActiveMemberships(userId) {
+/* ------------ profiles ------------ */
+async function getActiveMemberships({ prisma, userId }) {
   const rows = await prisma.userDepartment.findMany({
-    where: { userId, isActive: true },
+    where: { userId, isActive: true, endedAt: null },
     select: { departmentId: true, positionLevel: true },
   });
   return rows.map((r) => ({ deptId: r.departmentId, level: r.positionLevel }));
 }
 
-async function getPrimaryProfile(userId) {
+async function getPrimaryProfile({ prisma, userId }) {
   const u = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -52,8 +38,8 @@ async function getPrimaryProfile(userId) {
       primaryUserDept: { select: { departmentId: true, positionLevel: true } },
     },
   });
-  if (!u) throw err(404, "ไม่พบข้อมูลผู้ใช้");
-  const memberships = await getActiveMemberships(userId);
+  if (!u) throw AppError.notFound("ไม่พบข้อมูลผู้ใช้");
+  const memberships = await getActiveMemberships({ prisma, userId });
   return {
     id: u.id,
     roleName: (u.role?.name ?? "").toLowerCase(),
@@ -69,60 +55,72 @@ function assertProfileComplete(p, who = "บัญชีผู้ใช้") {
     ? p.memberships.filter((m) => m?.deptId != null && (m?.level ?? "") !== "")
     : [];
   if (lacksRole || validMemberships.length === 0) {
-    throw err(
-      400,
-      `${who} ยังไม่ได้ตั้งค่า role/department/positionLevel`,
-      "PROFILE_INCOMPLETE"
-    );
+    throw AppError.badRequest(`${who} ยังไม่ได้ตั้งค่า role/department/positionLevel`, "PROFILE_INCOMPLETE");
   }
 }
 
-export async function ensureCycleOpen(cycleId) {
+/* ------------ gates ------------ */
+async function isPrivileged({ prisma, me }) {
+  const role = (me?.roleName || "").toLowerCase();
+  if (role === "admin" || role === "hr") return true;
+
+  // ตรวจระดับ MD จาก membership
+  const hasMDLevel = Array.isArray(me?.memberships)
+    ? me.memberships.some((m) => String(m?.level || "").toUpperCase() === "MD")
+    : false;
+
+  // เผื่อ primary
+  const isPrimaryMD = String(me?.primaryLevel || "").toUpperCase() === "MD";
+  return hasMDLevel || isPrimaryMD;
+}
+
+export async function ensureCycleOpen(cycleId, { prisma = defaultPrisma } = {}) {
   const c = await prisma.evalCycle.findUnique({ where: { id: cycleId } });
-  if (!c) throw err(404, "ไม่พบรอบการประเมิน");
+  if (!c) throw AppError.notFound("ไม่พบรอบการประเมิน");
   const now = new Date();
   if (!c.isActive || now < c.openAt || now > c.closeAt) {
-    throw err(403, "รอบการประเมินไม่เปิดใช้งาน", "CYCLE_CLOSED");
+    throw AppError.forbidden("รอบการประเมินไม่เปิดใช้งาน", "CYCLE_CLOSED");
   }
   return c;
 }
 
-export async function canEvaluate(evaluatorId, evaluateeId) {
+export async function canEvaluate({ prisma = defaultPrisma, evaluatorId, evaluateeId }) {
   if (evaluatorId === evaluateeId) return true;
-  const ev = await getPrimaryProfile(evaluatorId);
-  const ee = await getPrimaryProfile(evaluateeId);
+  const ev = await getPrimaryProfile({ prisma, userId: evaluatorId });
+  const ee = await getPrimaryProfile({ prisma, userId: evaluateeId });
   assertProfileComplete(ev, "บัญชีผู้ประเมิน");
-  if (isAdmin(ev) || isMD(ev)) return true;
+  // admin/hr หรือ MD สามารถประเมินได้ทุกคน
+  if (await isPrivileged({ prisma, me: ev })) return true;
+
   const eeDept = ee.primaryDeptId;
   const eeLevel = ee.primaryLevel;
   if (eeDept == null || (eeLevel ?? "") === "") return false;
+
   return ev.memberships.some(
     (m) => m.deptId === eeDept && rank(m.level) > rank(eeLevel)
   );
 }
 
-export async function createEvaluation({
-  cycleId,
-  ownerId,
-  managerId,
-  mdId,
-  type,
-  byUserId,
-}) {
-  await ensureCycleOpen(cycleId);
+/* ------------ services ------------ */
+export async function createEvaluation(
+  { cycleId, ownerId, managerId, mdId, type, byUserId },
+  { prisma = defaultPrisma } = {}
+) {
+  await ensureCycleOpen(cycleId, { prisma });
+
   if (byUserId && byUserId !== ownerId) {
-    const actor = await getPrimaryProfile(byUserId);
-    assertProfileComplete(actor, "บัญชีผู้ประเมิน");
-    const ok = await canEvaluate(byUserId, ownerId);
-    if (!ok)
-      throw err(403, "คุณไม่มีสิทธิ์ประเมินผู้ใช้คนนี้", "FORBIDDEN_EVALUATE");
+    const ok = await canEvaluate({ prisma, evaluatorId: byUserId, evaluateeId: ownerId });
+    if (!ok) throw AppError.forbidden("คุณไม่มีสิทธิ์ประเมินผู้ใช้คนนี้", "FORBIDDEN_EVALUATE");
   }
+
   const exists = await prisma.evaluation.findUnique({
     where: { cycleId_ownerId: { cycleId, ownerId } },
   });
   if (exists) return exists;
+
   const cyc = await prisma.evalCycle.findUnique({ where: { id: cycleId } });
-  if (!cyc) throw err(404, "ไม่พบรอบการประเมิน");
+  if (!cyc) throw AppError.notFound("ไม่พบรอบการประเมิน");
+
   return prisma.evaluation.create({
     data: {
       ownerId,
@@ -137,7 +135,7 @@ export async function createEvaluation({
   });
 }
 
-export async function getEvaluation(id) {
+export async function getEvaluation(id, { prisma = defaultPrisma } = {}) {
   const row = await prisma.evaluation.findUnique({
     where: { id },
     include: {
@@ -161,33 +159,38 @@ export async function getEvaluation(id) {
       md: { select: { id: true, firstNameTh: true, lastNameTh: true } },
     },
   });
-  if (!row) throw err(404, "ไม่พบแบบฟอร์มการประเมิน");
+  if (!row) throw AppError.notFound("ไม่พบแบบฟอร์มการประเมิน");
   return row;
 }
 
-export async function updateEvaluation(id, data, byUserId) {
+export async function updateEvaluation(id, data, byUserId, { prisma = defaultPrisma } = {}) {
   const ev = await prisma.evaluation.findUnique({ where: { id } });
-  if (!ev) throw err(404, "ไม่พบแบบฟอร์มการประเมิน");
-  if (!["DRAFT", "REJECTED"].includes(ev.status))
-    throw err(409, "ไม่สามารถแก้ไขหลังส่งแล้ว");
-  await ensureCycleOpen(ev.cycleId);
-  if (byUserId !== ev.ownerId) {
-    const actor = await getPrimaryProfile(byUserId);
-    const canOverride = actor.roleName === "admin" || actor.roleName === "hr";
-    if (!canOverride)
-      throw err(403, "เฉพาะเจ้าของ (หรือ HR/Admin) ที่สามารถแก้ไขร่างได้");
+  if (!ev) throw AppError.notFound("ไม่พบแบบฟอร์มการประเมิน");
+  if (!["DRAFT", "REJECTED"].includes(ev.status)) {
+    throw AppError.conflict("ไม่สามารถแก้ไขหลังส่งแล้ว");
   }
+
+  await ensureCycleOpen(ev.cycleId, { prisma });
+
+  if (byUserId !== ev.ownerId) {
+    const actor = await getPrimaryProfile({ prisma, userId: byUserId });
+    const canOverride = ["admin", "hr"].includes(actor.roleName);
+    if (!canOverride) {
+      throw AppError.forbidden("เฉพาะเจ้าของ (หรือ HR/Admin) ที่สามารถแก้ไขร่างได้");
+    }
+  }
+
   return prisma.evaluation.update({ where: { id }, data });
 }
 
-export async function submitEvaluation(id, byUserId, payload = {}) {
+export async function submitEvaluation(id, byUserId, payload = {}, { prisma = defaultPrisma } = {}) {
   const ev = await prisma.evaluation.findUnique({ where: { id } });
-  if (!ev) throw err(404, "ไม่พบแบบฟอร์มการประเมิน");
-  if (byUserId !== ev.ownerId)
-    throw err(403, "เฉพาะเจ้าของเท่านั้นที่สามารถส่งฟอร์มได้");
-  await ensureCycleOpen(ev.cycleId);
+  if (!ev) throw AppError.notFound("ไม่พบแบบฟอร์มการประเมิน");
+  if (byUserId !== ev.ownerId) throw AppError.forbidden("เฉพาะเจ้าของเท่านั้นที่สามารถส่งฟอร์มได้");
 
-  const ownerProfile = await getPrimaryProfile(byUserId);
+  await ensureCycleOpen(ev.cycleId, { prisma });
+
+  const ownerProfile = await getPrimaryProfile({ prisma, userId: byUserId });
   assertProfileComplete(ownerProfile, "บัญชีผู้ยื่น");
 
   const submitterSignature = requireSignature(payload.signature);
@@ -205,7 +208,7 @@ export async function submitEvaluation(id, byUserId, payload = {}) {
   };
 
   const isSelfMgr = ev.managerId && ev.managerId === ev.ownerId;
-  const isSelfMD = ev.mdId && ev.mdId === ev.ownerId;
+  const isSelfMD  = ev.mdId && ev.mdId === ev.ownerId;
 
   if (isSelfMgr || !ev.managerId) {
     Object.assign(data, {
@@ -224,16 +227,17 @@ export async function submitEvaluation(id, byUserId, payload = {}) {
       mdSignature: submitterSignature,
     });
   }
+
   return prisma.evaluation.update({ where: { id: ev.id }, data });
 }
 
-export async function approveByManager(id, byUserId, payload = {}) {
+export async function approveByManager(id, byUserId, payload = {}, { prisma = defaultPrisma } = {}) {
   const ev = await prisma.evaluation.findUnique({ where: { id } });
-  if (!ev) throw err(404, "ไม่พบแบบฟอร์มการประเมิน");
-  if (ev.status !== "SUBMITTED") throw err(409, "ต้องส่งฟอร์มก่อนอนุมัติ");
-  if (byUserId !== ev.managerId)
-    throw err(403, "เฉพาะหัวหน้าที่ได้รับมอบหมายเท่านั้น");
-  await ensureCycleOpen(ev.cycleId);
+  if (!ev) throw AppError.notFound("ไม่พบแบบฟอร์มการประเมิน");
+  if (ev.status !== "SUBMITTED") throw AppError.conflict("ต้องส่งฟอร์มก่อนอนุมัติ");
+  if (byUserId !== ev.managerId) throw AppError.forbidden("เฉพาะหัวหน้าที่ได้รับมอบหมายเท่านั้น");
+
+  await ensureCycleOpen(ev.cycleId, { prisma });
 
   const sig = requireSignature(payload.signature);
   const now = new Date();
@@ -256,13 +260,13 @@ export async function approveByManager(id, byUserId, payload = {}) {
   return prisma.evaluation.update({ where: { id: ev.id }, data });
 }
 
-export async function approveByMD(id, byUserId, payload = {}) {
+export async function approveByMD(id, byUserId, payload = {}, { prisma = defaultPrisma } = {}) {
   const ev = await prisma.evaluation.findUnique({ where: { id } });
-  if (!ev) throw err(404, "ไม่พบแบบฟอร์มการประเมิน");
-  if (ev.status !== "APPROVER_APPROVED")
-    throw err(409, "ต้องได้รับการอนุมัติจากหัวหน้าก่อน");
-  if (byUserId !== ev.mdId) throw err(403, "เฉพาะ MD ที่ได้รับมอบหมายเท่านั้น");
-  await ensureCycleOpen(ev.cycleId);
+  if (!ev) throw AppError.notFound("ไม่พบแบบฟอร์มการประเมิน");
+  if (ev.status !== "APPROVER_APPROVED") throw AppError.conflict("ต้องได้รับการอนุมัติจากหัวหน้าก่อน");
+  if (byUserId !== ev.mdId) throw AppError.forbidden("เฉพาะ MD ที่ได้รับมอบหมายเท่านั้น");
+
+  await ensureCycleOpen(ev.cycleId, { prisma });
 
   const sig = requireSignature(payload.signature);
   const now = new Date();
@@ -279,35 +283,33 @@ export async function approveByMD(id, byUserId, payload = {}) {
   });
 }
 
-export async function rejectEvaluation(id, byUserId, comment) {
+export async function rejectEvaluation(id, byUserId, comment, { prisma = defaultPrisma } = {}) {
   const ev = await prisma.evaluation.findUnique({ where: { id } });
-  if (!ev) throw err(404, "ไม่พบแบบฟอร์มการประเมิน");
+  if (!ev) throw AppError.notFound("ไม่พบแบบฟอร์มการประเมิน");
   if (!["SUBMITTED", "APPROVER_APPROVED"].includes(ev.status)) {
-    throw err(409, "ไม่สามารถปฏิเสธได้ในสถานะนี้");
+    throw AppError.conflict("ไม่สามารถปฏิเสธได้ในสถานะนี้");
   }
   if (![ev.managerId, ev.mdId].includes(byUserId)) {
-    throw err(403, "เฉพาะหัวหน้าหรือ MD ที่ได้รับมอบหมายเท่านั้น");
+    throw AppError.forbidden("เฉพาะหัวหน้าหรือ MD ที่ได้รับมอบหมายเท่านั้น");
   }
-  await ensureCycleOpen(ev.cycleId);
+  await ensureCycleOpen(ev.cycleId, { prisma });
 
   return prisma.evaluation.update({
     where: { id: ev.id },
     data: {
       status: "REJECTED",
-      ...(byUserId === ev.managerId
-        ? { managerComment: comment ?? ev.managerComment }
-        : {}),
-      ...(byUserId === ev.mdId ? { mdComment: comment ?? ev.mdComment } : {}),
+      ...(byUserId === ev.managerId ? { managerComment: comment ?? ev.managerComment } : {}),
+      ...(byUserId === ev.mdId     ? { mdComment: comment ?? ev.mdComment }       : {}),
       rejectedAt: new Date(),
     },
   });
 }
 
-export async function deleteEvaluation(id) {
+export async function deleteEvaluation(id, { prisma = defaultPrisma } = {}) {
   return prisma.evaluation.delete({ where: { id } });
 }
 
-export async function listEvaluations(params = {}) {
+export async function listEvaluations(params = {}, { prisma = defaultPrisma } = {}) {
   const { cycleId, ownerId, status, managerId, mdId } = params;
   return prisma.evaluation.findMany({
     where: {
@@ -341,13 +343,18 @@ export async function listEvaluations(params = {}) {
   });
 }
 
-export async function listEligibleEvaluatees(cycleId, byUserId, opts = {}) {
-  if (byUserId == null) {
-    throw err(401, "UNAUTHORIZED");
-  }
+export async function listEligibleEvaluatees(
+  cycleId,
+  byUserId,
+  opts = {},
+  { prisma = defaultPrisma } = {}
+) {
+  if (byUserId == null) throw AppError.unauthorized();
+
   const { includeSelf = false, includeTaken = false } = opts;
 
-  const me = await getPrimaryProfile(byUserId);
+  const me = await getPrimaryProfile({ prisma, userId: byUserId });
+
   const takenSet = new Set(
     (
       await prisma.evaluation.findMany({
@@ -357,25 +364,21 @@ export async function listEligibleEvaluatees(cycleId, byUserId, opts = {}) {
     ).map((x) => x.ownerId)
   );
 
-  if (isPrivileged(me)) {
+  if (await isPrivileged({ prisma, me })) {
     const all = await prisma.user.findMany({
-      where: {
-        deletedAt: null,
-        ...(includeSelf ? {} : { id: { not: byUserId } }),
-      },
+      where: { deletedAt: null, ...(includeSelf ? {} : { id: { not: byUserId } }) },
       select: {
         id: true,
         firstNameTh: true,
         lastNameTh: true,
-        primaryUserDept: {
-          select: { departmentId: true, positionLevel: true },
-        },
+        primaryUserDept: { select: { departmentId: true, positionLevel: true } },
       },
     });
     return all.filter((u) => includeTaken || !takenSet.has(u.id));
   }
 
   assertProfileComplete(me, "บัญชีผู้ประเมิน");
+
   const myDepts = me.memberships.map((m) => m.deptId);
   const myLevelByDept = new Map(me.memberships.map((m) => [m.deptId, m.level]));
 
@@ -400,11 +403,7 @@ export async function listEligibleEvaluatees(cycleId, byUserId, opts = {}) {
     const lvMine = myLevelByDept.get(dept);
     const lvHis = u.primaryUserDept?.positionLevel;
     if (dept != null && lvMine && rank(lvMine) > rank(lvHis)) {
-      out.push({
-        id: u.id,
-        firstNameTh: u.firstNameTh,
-        lastNameTh: u.lastNameTh,
-      });
+      out.push({ id: u.id, firstNameTh: u.firstNameTh, lastNameTh: u.lastNameTh });
     }
   }
   if (out.length === 0 && includeSelf) {
