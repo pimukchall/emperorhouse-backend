@@ -145,6 +145,11 @@ model User {
   avatarPath String? @db.VarChar(255)
 
   passwordResets PasswordReset[]
+  refreshTokens  RefreshToken[]
+
+  // สำหรับ lockout เบื้องต้น (ถ้ายังไม่ใช้ จะไม่มีผล)
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -266,6 +271,7 @@ model EvalCycle {
   @@index([year, stage])
   @@index([isActive])
 }
+
 model Evaluation {
   id Int @id @default(autoincrement())
 
@@ -351,4 +357,21 @@ model Evaluation {
   @@index([managerId])
   @@index([mdId])
   @@index([cycleId, status])
+}
+
+/* ---------------- Refresh Token (ใหม่) ---------------- */
+model RefreshToken {
+  id         Int      @id @default(autoincrement())
+  jti        String   @unique @db.VarChar(64)
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  revoked    Boolean  @default(false)
+  replacedBy String?  @db.VarChar(64)
+
+  @@index([userId])
+  @@index([revoked])
+  @@index([expiresAt])
 }

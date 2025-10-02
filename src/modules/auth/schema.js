@@ -13,11 +13,13 @@ export const Register = z.object({
 
 export const Login = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  // เดิม min(6) -> ทำให้สอดคล้องกับ Register/ChangePassword
+  password: z.string().min(8),
 });
 
 export const ChangePassword = z.object({
-  currentPassword: z.string().min(6),
+  // เดิม min(6) -> เพิ่มเป็น 8 เพื่อให้ policy ตรงกัน
+  currentPassword: z.string().min(8),
   newPassword: z.string().min(8),
 });
 

@@ -29,7 +29,7 @@ export const UserListQuery = z.object({
 
 export const UserCreate = z.object({
   email: z.string().email(),
-  password: z.string().min(6).optional(),
+  password: z.string().min(8, "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร"),
   name: z.string().trim().optional(),
   roleId: z.coerce.number().int().positive().optional(),
   orgId: z.coerce.number().int().positive().nullable().optional(),

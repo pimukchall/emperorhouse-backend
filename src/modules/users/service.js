@@ -23,6 +23,8 @@ const baseInclude = {
   },
 };
 
+const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12);
+
 /* =============== LIST =============== */
 export async function listUsersService(
   {
@@ -100,11 +102,15 @@ export async function createUserService({ prisma = defaultPrisma, data }) {
   const email = String(data?.email || "").trim().toLowerCase();
   if (!email) throw AppError.badRequest("ต้องระบุอีเมล");
 
-  const dup = await prisma.user.findFirst({ where: { email } });
+  // กรอง soft-delete: อนุญาตสมัครซ้ำเฉพาะที่ไม่ได้ลบไว้ (ตาม policy)
+  const dup = await prisma.user.findFirst({ where: { email, deletedAt: null } });
   if (dup) throw AppError.conflict("อีเมลนี้ถูกใช้งานแล้ว");
 
-  const password = String(data?.password || "").trim() || "Emp@123456";
-  const passwordHash = await bcrypt.hash(password, 10);
+  const password = String(data?.password || "").trim();
+  if (!password || password.length < 8) {
+    throw AppError.badRequest("ต้องระบุรหัสผ่านอย่างน้อย 8 ตัวอักษร");
+  }
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
   return prisma.user.create({
     data: {
@@ -232,5 +238,7 @@ export async function selfUpdateProfileService({ prisma = defaultPrisma, userId,
   }
 
   await prisma.user.update({ where: { id: uid }, data: out });
-  return { ok: true };
+  // เปลี่ยนให้คืน user object ล่าสุด (รวม relation) เพื่อ FE อัปเดต state ได้ทันที
+  const updated = await prisma.user.findUnique({ where: { id: uid }, include: baseInclude });
+  return updated;
 }

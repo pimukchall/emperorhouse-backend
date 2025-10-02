@@ -52,8 +52,9 @@ export const refreshController = [
 
 // POST /api/auth/logout
 export const logoutController = [
-  asyncHandler(async (_req, res) => {
-    await logoutService();
+  asyncHandler(async (req, res) => {
+    const token = req.cookies?.refresh_token || null;
+    await logoutService({ refreshToken: token });
     clearRefreshCookie(res);
     res.json({ ok: true });
   }),
@@ -82,7 +83,8 @@ export const forgotPasswordController = [
 // POST /api/auth/reset
 export const resetPasswordController = [
   asyncHandler(async (req, res) => {
-    const token = req.body?.token ?? req.query?.token ?? req.headers["x-reset-token"];
+    // ลด surface area: รับ token จาก body เท่านั้น
+    const token = req.body?.token;
     const { newPassword } = req.body;
     await resetPasswordService({ token, newPassword });
     res.json({ ok: true });
