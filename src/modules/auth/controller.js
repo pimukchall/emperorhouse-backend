@@ -15,9 +15,13 @@ import { setRefreshCookie, clearRefreshCookie } from "#lib/tokens.js";
 export const registerController = [
   asyncHandler(async (req, res) => {
     const result = await registerService({ payload: req.body });
-    // เก็บ refresh token ที่ httpOnly cookie, access token ส่งกลับใน body
-    if (result.tokens?.refreshToken) setRefreshCookie(res, result.tokens.refreshToken);
-    res.json({ ok: true, user: result.sessionUser, accessToken: result.tokens?.accessToken });
+    if (result.tokens?.refreshToken)
+      setRefreshCookie(res, result.tokens.refreshToken);
+    res.json({
+      ok: true,
+      user: result.sessionUser,
+      accessToken: result.tokens?.accessToken,
+    });
   }),
 ];
 
@@ -26,8 +30,13 @@ export const loginController = [
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     const result = await loginService({ email, password });
-    if (result.tokens?.refreshToken) setRefreshCookie(res, result.tokens.refreshToken);
-    res.json({ ok: true, user: result.sessionUser, accessToken: result.tokens?.accessToken });
+    if (result.tokens?.refreshToken)
+      setRefreshCookie(res, result.tokens.refreshToken);
+    res.json({
+      ok: true,
+      user: result.sessionUser,
+      accessToken: result.tokens?.accessToken,
+    });
   }),
 ];
 
@@ -41,20 +50,28 @@ export const refreshController = [
       null;
 
     if (!token) {
-      return res.status(401).json({ ok: false, error: { code: "NO_REFRESH_TOKEN", message: "ไม่มี refresh token" } });
+      return res
+        .status(401)
+        .json({
+          ok: false,
+          error: { code: "NO_REFRESH_TOKEN", message: "ไม่มี refresh token" },
+        });
     }
 
     const result = await refreshService({ refreshToken: token });
-    if (result.tokens?.refreshToken) setRefreshCookie(res, result.tokens.refreshToken);
-    res.json({ ok: true, user: result.sessionUser, accessToken: result.tokens?.accessToken });
+    // ไม่ตั้ง cookie ใหม่ เพราะเราไม่ rotate refresh token
+    res.json({
+      ok: true,
+      user: result.sessionUser,
+      accessToken: result.tokens?.accessToken,
+    });
   }),
 ];
 
 // POST /api/auth/logout
 export const logoutController = [
   asyncHandler(async (req, res) => {
-    const token = req.cookies?.refresh_token || null;
-    await logoutService({ refreshToken: token });
+    await logoutService();
     clearRefreshCookie(res);
     res.json({ ok: true });
   }),
@@ -63,7 +80,6 @@ export const logoutController = [
 // GET /api/auth/me
 export const meController = [
   asyncHandler(async (req, res) => {
-    // routes ครอบ requireAuth + requireMe ไว้แล้ว
     const id = Number(req.me?.id || req.user?.id || req.auth?.sub);
     if (!id) return res.json({ ok: true, isAuthenticated: false, user: null });
     const user = await meService({ userId: id });
@@ -83,7 +99,6 @@ export const forgotPasswordController = [
 // POST /api/auth/reset
 export const resetPasswordController = [
   asyncHandler(async (req, res) => {
-    // ลด surface area: รับ token จาก body เท่านั้น
     const token = req.body?.token;
     const { newPassword } = req.body;
     await resetPasswordService({ token, newPassword });
@@ -95,7 +110,11 @@ export const resetPasswordController = [
 export const changePasswordController = [
   asyncHandler(async (req, res) => {
     const userId = Number(req.me?.id || req.user?.id || req.auth?.sub);
-    await changePasswordService({ userId, currentPassword: req.body.currentPassword, newPassword: req.body.newPassword });
+    await changePasswordService({
+      userId,
+      currentPassword: req.body.currentPassword,
+      newPassword: req.body.newPassword,
+    });
     res.json({ ok: true });
   }),
 ];

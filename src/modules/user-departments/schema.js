@@ -1,54 +1,68 @@
 import { z } from "zod";
 
-const Boolish = z.preprocess((v) => {
+/** แปลงค่าที่พิมพ์มาเป็น boolean จริง */
+export const Boolish = z.preprocess((v) => {
   if (typeof v === "boolean") return v;
   if (typeof v === "string") {
-    const s = v.toLowerCase();
-    if (s === "1" || s === "true") return true;
-    if (s === "0" || s === "false") return false;
+    const s = v.trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(s)) return true;
+    if (["false", "0", "no", "n", ""].includes(s)) return false;
   }
-  return undefined;
-}, z.boolean().optional());
+  return v;
+}, z.boolean());
 
-export const UdParam = z.object({
-  udId: z.coerce.number().int().positive(),
-});
+/** เลขจำนวนเต็ม (coerce) */
+const IntId = z.coerce.number().int().positive();
 
-export const UserParam = z.object({
-  id: z.coerce.number().int().positive(),
-});
+/** DateTime string (ISO) หรือปล่อยว่าง */
+const IsoDateOpt = z.string().datetime().optional();
+const IsoDateNullOpt = z.string().datetime().nullable().optional();
 
-export const UserParam2 = z.object({
-  userId: z.coerce.number().int().positive(),
-});
+/** Enum PositionLevel ตาม Prisma */
+const PositionLevel = z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]);
 
+/* -------------------- Query/Params -------------------- */
 export const ListQuery = z.object({
-  activeOnly: Boolish.default(false),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(20),
+  q: z.string().trim().default(""),
+  activeOnly: Boolish.optional().default(false),
+  departmentId: IntId.optional(),
+  userId: IntId.optional(),
 });
 
+export const ParamsUserId = z.object({
+  userId: IntId,
+});
+
+export const ListByUserQuery = z.object({
+  activeOnly: Boolish.optional().default(false),
+});
+
+export const ParamsId = z.object({
+  id: IntId,
+});
+
+/* -------------------- Bodies -------------------- */
 export const AssignBody = z.object({
-  userId: z.coerce.number().int().positive(),
-  departmentId: z.coerce.number().int().positive(),
-  positionLevel: z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]),
+  userId: IntId,
+  departmentId: IntId,
+  positionLevel: PositionLevel,
   positionName: z.string().trim().nullable().optional(),
-  startedAt: z.string().datetime().optional(),
+  startedAt: IsoDateOpt,
+  makePrimary: Boolish.optional().default(false),
 });
 
 export const EndOrRenameBody = z.object({
-  positionName: z.string().trim().nullable().optional(),
-  endedAt: z.string().datetime().optional(),
+  endedAt: IsoDateNullOpt,                // ถ้าส่ง null/ไม่ส่ง = ไม่ end
+  newPositionName: z.string().trim().nullable().optional(),
+  reason: z.string().trim().optional(),
+  effectiveDate: IsoDateOpt,              // วันที่มีผลของ log
 });
 
 export const ChangeLevelBody = z.object({
-  udId: z.coerce.number().int().positive(),
-  newLevel: z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]),
-  actorId: z.coerce.number().int().positive().nullable().optional(),
-  effectiveDate: z.string().datetime().optional(),
-  reason: z.string().trim().nullable().optional(),
+  toLevel: PositionLevel,
   newPositionName: z.string().trim().nullable().optional(),
-});
-
-export const SetPrimaryParams = z.object({
-  userId: z.coerce.number().int().positive(),
-  udId: z.coerce.number().int().positive(),
+  reason: z.string().trim().optional(),
+  effectiveDate: IsoDateOpt,
 });

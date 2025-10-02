@@ -41,7 +41,22 @@ export const UserCreate = z.object({
   gender: z.enum(["MALE", "FEMALE", "OTHER", "UNSPECIFIED"]).nullable().optional(),
 });
 
-export const UserUpdate = UserCreate.partial();
+export const UserUpdate = z.object({
+  email: z.string().email().optional(),
+  name: z.string().trim().optional(),
+  roleId: z.coerce.number().int().positive().optional(),
+  orgId: z.coerce.number().int().positive().nullable().optional(),
+  firstNameTh: z.string().trim().optional(),
+  lastNameTh: z.string().trim().optional(),
+  firstNameEn: z.string().trim().optional(),
+  lastNameEn: z.string().trim().optional(),
+  birthDate: z.string().datetime().nullable().optional(),
+  gender: z.enum(["MALE", "FEMALE", "OTHER", "UNSPECIFIED"]).nullable().optional(),
+  employeeCode: z.string().trim().nullable().optional(),
+  employeeType: z.enum(["DAILY","MONTHLY"]).nullable().optional(),
+  contractType: z.enum(["PERMANENT","TEMPORARY","PROBATION"]).nullable().optional(),
+  avatarPath: z.string().trim().nullable().optional(),
+});
 
 export const SetPrimaryDept = z.object({
   departmentId: z.coerce.number().int().positive(),

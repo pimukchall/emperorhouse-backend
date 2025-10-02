@@ -13,7 +13,6 @@ export const Register = z.object({
 
 export const Login = z.object({
   email: z.string().email(),
-  // เดิม min(6) -> ทำให้สอดคล้องกับ Register/ChangePassword
   password: z.string().min(8),
 });
 

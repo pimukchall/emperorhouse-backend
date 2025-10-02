@@ -1,67 +1,117 @@
 import { asyncHandler } from "#utils/asyncHandler.js";
 import {
+  listAssignmentsService,
+  listByUserService,
   assignUserToDepartmentService,
   endOrRenameAssignmentService,
   changeLevelService,
-  listAssignmentsService,
-  listAssignmentsByUser,
   setPrimaryAssignmentService,
 } from "./service.js";
 
-// GET /api/user-departments/:id?activeOnly=true   (id = userId)
+/* ---------------- List all assignments (with filters) ---------------- */
+// GET /api/user-departments
 export const listAssignmentsController = [
   asyncHandler(async (req, res) => {
-    const userId = Number(req.params.id);
-    const activeOnly = Boolean(req.query.activeOnly);
-    const data = await listAssignmentsService({ userId, activeOnly });
-    res.json({ ok: true, data });
+    // ✅ activeOnly ถูก validate แล้วเป็น boolean
+    const {
+      page = 1,
+      limit = 20,
+      q = "",
+      activeOnly = false,
+      departmentId,
+      userId,
+    } = req.query;
+
+    const result = await listAssignmentsService({
+      page: Number(page),
+      limit: Number(limit),
+      q: String(q || ""),
+      activeOnly: Boolean(activeOnly),
+      departmentId: departmentId != null ? Number(departmentId) : undefined,
+      userId: userId != null ? Number(userId) : undefined,
+    });
+
+    res.json({ ok: true, ...result });
   }),
 ];
 
-// GET /api/user-departments/users/:userId?activeOnly=true
+/* ---------------- List by user ---------------- */
+// GET /api/user-departments/user/:userId
 export const listByUserController = [
   asyncHandler(async (req, res) => {
     const userId = Number(req.params.userId);
-    const activeOnly = Boolean(req.query.activeOnly);
-    const data = await listAssignmentsByUser({ userId, activeOnly });
-    res.json({ ok: true, data });
+    if (!userId) return res.status(400).json({ ok: false, error: "Missing userId" });
+
+    const { activeOnly = false } = req.query;
+
+    const result = await listByUserService({
+      userId,
+      activeOnly: Boolean(activeOnly),
+    });
+    res.json({ ok: true, ...result });
   }),
 ];
 
-// POST /api/user-departments
-export const addOrUpdateAssignmentController = [
+/* ---------------- Assign user to department ---------------- */
+// POST /api/user-departments/assign
+export const assignController = [
   asyncHandler(async (req, res) => {
-    const out = await assignUserToDepartmentService({ ...req.body });
-    res.status(201).json({ ok: true, data: out });
+    const actorId = Number(req.me?.id || req.user?.id || req.auth?.sub);
+    const payload = req.body;
+    const result = await assignUserToDepartmentService({ actorId, payload });
+    res.json({ ok: true, assignment: result });
   }),
 ];
 
-// POST /api/user-departments/change-level
+/* ---------------- End assignment / Rename position ---------------- */
+// PATCH /api/user-departments/:id/end-or-rename
+export const endOrRenameController = [
+  asyncHandler(async (req, res) => {
+    const actorId = Number(req.me?.id || req.user?.id || req.auth?.sub);
+    const id = Number(req.params.id);
+    const body = req.body;
+
+    const result = await endOrRenameAssignmentService({
+      actorId,
+      id,
+      endedAt: body?.endedAt,
+      newPositionName: body?.newPositionName,
+      reason: body?.reason,
+      effectiveDate: body?.effectiveDate,
+    });
+
+    res.json({ ok: true, assignment: result });
+  }),
+];
+
+/* ---------------- Change level ---------------- */
+// PATCH /api/user-departments/:id/change-level
 export const changeLevelController = [
   asyncHandler(async (req, res) => {
-    const out = await changeLevelService({
-      ...req.body,
-      actorId: req.me?.id ?? null, // ตั้งจากผู้ที่ยิงคำสั่ง
+    const actorId = Number(req.me?.id || req.user?.id || req.auth?.sub);
+    const id = Number(req.params.id);
+    const { toLevel, newPositionName, reason, effectiveDate } = req.body;
+
+    const result = await changeLevelService({
+      actorId,
+      id,
+      toLevel,
+      newPositionName,
+      reason,
+      effectiveDate,
     });
-    res.json({ ok: true, data: out });
+
+    res.json({ ok: true, assignment: result });
   }),
 ];
 
-// PATCH /api/user-departments/:udId
-export const endOrRenameAssignmentController = [
-  asyncHandler(async (req, res) => {
-    const udId = Number(req.params.udId);
-    const out = await endOrRenameAssignmentService({ udId, ...req.body });
-    res.json({ ok: true, data: out });
-  }),
-];
-
-// POST /api/user-departments/users/:userId/primary/:udId
+/* ---------------- Set primary for user ---------------- */
+// PATCH /api/user-departments/:id/set-primary
 export const setPrimaryController = [
   asyncHandler(async (req, res) => {
-    const userId = Number(req.params.userId);
-    const udId = Number(req.params.udId);
-    const out = await setPrimaryAssignmentService({ userId, udId });
-    res.json({ ok: true, data: out });
+    const actorId = Number(req.me?.id || req.user?.id || req.auth?.sub);
+    const id = Number(req.params.id);
+    const result = await setPrimaryAssignmentService({ actorId, id });
+    res.json({ ok: true, assignment: result });
   }),
 ];

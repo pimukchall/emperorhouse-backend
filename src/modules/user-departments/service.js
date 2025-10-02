@@ -1,143 +1,296 @@
 import { prisma as defaultPrisma } from "#lib/prisma.js";
 import { AppError } from "#utils/appError.js";
 
-const LEVELS = ["STAF", "SVR", "ASST", "MANAGER", "MD"];
-
-function normalizeLevel(v) {
-  const up = String(v || "").toUpperCase();
-  if (!LEVELS.includes(up)) throw AppError.badRequest("ตำแหน่งไม่ถูกต้อง");
-  return up;
+/** จัดลำดับชั้นตำแหน่ง (ต่ำ -> สูง) */
+export const LEVELS = ["STAF", "SVR", "ASST", "MANAGER", "MD"];
+function levelRank(lv) {
+  const i = LEVELS.indexOf(String(lv || ""));
+  return i >= 0 ? i : -1;
 }
 
-async function assertNoOtherActiveMD({
-  prisma,
+/* normalize select for response */
+const deptSelect = { id: true, code: true, nameTh: true, nameEn: true };
+const assignmentSelect = {
+  id: true,
+  userId: true,
+  departmentId: true,
+  positionLevel: true,
+  positionName: true,
+  startedAt: true,
+  endedAt: true,
+  isActive: true,
+  department: { select: deptSelect },
+};
+
+/* ---------------- List (with filters) ---------------- */
+export async function listAssignmentsService({
+  prisma = defaultPrisma,
+  page = 1,
+  limit = 20,
+  q = "",
+  activeOnly = false,
   departmentId,
-  exceptUserId = null,
+  userId,
 }) {
-  const existed = await prisma.userDepartment.findFirst({
+  const where = {
+    ...(activeOnly ? { endedAt: null, isActive: true } : {}),
+    ...(departmentId ? { departmentId: Number(departmentId) } : {}),
+    ...(userId ? { userId: Number(userId) } : {}),
+    ...(q
+      ? {
+          OR: [
+            { positionName: { contains: q } },
+            { department: { nameTh: { contains: q } } },
+            { department: { nameEn: { contains: q } } },
+            { department: { code: { contains: q } } },
+          ],
+        }
+      : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.userDepartment.findMany({
+      where,
+      select: assignmentSelect,
+      orderBy: [{ isActive: "desc" }, { startedAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.userDepartment.count({ where }),
+  ]);
+
+  return { items, total, page, limit };
+}
+
+/* ---------------- List by user ---------------- */
+export async function listByUserService({ prisma = defaultPrisma, userId, activeOnly = false }) {
+  if (!userId) throw AppError.badRequest("Missing userId");
+  const where = {
+    userId: Number(userId),
+    ...(activeOnly ? { endedAt: null, isActive: true } : {}),
+  };
+
+  const items = await prisma.userDepartment.findMany({
+    where,
+    select: assignmentSelect,
+    orderBy: [{ isActive: "desc" }, { startedAt: "desc" }, { id: "desc" }],
+  });
+
+  return { items };
+}
+
+/* ---------------- Assign ---------------- */
+export async function assignUserToDepartmentService({ prisma = defaultPrisma, actorId, payload }) {
+  const {
+    userId,
+    departmentId,
+    positionLevel,
+    positionName,
+    startedAt,
+    makePrimary = false,
+  } = payload || {};
+
+  if (!userId || !departmentId || !positionLevel) {
+    throw AppError.badRequest("ต้องระบุ userId, departmentId และ positionLevel");
+  }
+
+  // กัน MD ซ้ำในแผนก
+  if (positionLevel === "MD") {
+    const mdExists = await prisma.userDepartment.findFirst({
+      where: { departmentId: Number(departmentId), positionLevel: "MD", endedAt: null, isActive: true },
+      select: { id: true },
+    });
+    if (mdExists) throw AppError.conflict("แผนกนี้มี MD อยู่แล้ว");
+  }
+
+  // ปิด assignment เดิม (user+dept เดียวกัน) ก่อน
+  await prisma.userDepartment.updateMany({
     where: {
+      userId: Number(userId),
       departmentId: Number(departmentId),
       endedAt: null,
       isActive: true,
-      positionLevel: "MD",
-      ...(exceptUserId ? { userId: { not: Number(exceptUserId) } } : {}),
     },
-    select: { id: true, userId: true },
+    data: { endedAt: new Date(), isActive: false },
   });
-  if (existed) throw AppError.conflict("ในแผนกนี้มี MD ที่ยัง active อยู่แล้ว");
-}
 
-async function getUdWithJoins(prisma, udId) {
-  const rec = await prisma.userDepartment.findUnique({
-    where: { id: Number(udId) },
-    include: {
-      user: {
-        select: { id: true, name: true, firstNameTh: true, lastNameTh: true },
-      },
-      department: {
-        select: { id: true, code: true, nameTh: true, nameEn: true },
-      },
+  // สร้างระเบียนใหม่
+  const created = await prisma.userDepartment.create({
+    data: {
+      userId: Number(userId),
+      departmentId: Number(departmentId),
+      positionLevel,
+      positionName: positionName || null,
+      startedAt: startedAt ? new Date(startedAt) : new Date(),
+      isActive: true,
     },
+    select: assignmentSelect,
   });
-  if (!rec) throw AppError.notFound("ไม่พบข้อมูล assignment ที่ระบุ");
-  return rec;
-}
 
-/** ผูกผู้ใช้เข้ากับแผนก (หรือย้าย level/name) */
-export async function assignUserToDepartmentService({
-  prisma = defaultPrisma,
-  userId,
-  departmentId,
-  positionLevel,
-  positionName,
-  startedAt,
-}) {
-  const uid = Number(userId);
-  const did = Number(departmentId);
-  if (!uid || !did) throw AppError.badRequest("userId/departmentId ไม่ถูกต้อง");
-  const level = normalizeLevel(positionLevel);
-  const now = new Date();
-
-  if (level === "MD") {
-    await assertNoOtherActiveMD({ prisma, departmentId: did });
+  // ตั้ง primary ครั้งแรกอัตโนมัติ หรือถ้า makePrimary = true
+  const user = await prisma.user.findUnique({
+    where: { id: Number(userId) },
+    select: { id: true, primaryUserDeptId: true },
+  });
+  if (!user?.primaryUserDeptId || makePrimary) {
+    await prisma.user.update({
+      where: { id: Number(userId) },
+      data: { primaryUserDeptId: created.id },
+    });
   }
 
-  const ud = await prisma.$transaction(async (tx) => {
-    // ปิดระเบียนเดิม (ถ้ามี)
-    await tx.userDepartment.updateMany({
-      where: { userId: uid, departmentId: did, endedAt: null, isActive: true },
-      data: { isActive: false, endedAt: now },
-    });
-
-    // สร้างระเบียนใหม่
-    const created = await tx.userDepartment.create({
-      data: {
-        userId: uid,
-        departmentId: did,
-        positionLevel: level,
-        positionName: positionName || null,
-        startedAt: startedAt ? new Date(startedAt) : now,
-        endedAt: null,
-        isActive: true,
-      },
-      include: { department: true },
-    });
-
-    // ตั้งเป็น primary ถ้ายังไม่มี
-    const owner = await tx.user.findUnique({
-      where: { id: uid },
-      select: { id: true, primaryUserDeptId: true },
-    });
-    if (owner && !owner.primaryUserDeptId) {
-      await tx.user.update({
-        where: { id: uid },
-        data: { primaryUserDeptId: created.id },
-      });
-    }
-
-    return created;
+  // Log (TRANSFER)
+  await prisma.positionChangeLog.create({
+    data: {
+      kind: "TRANSFER",
+      userId: Number(userId),
+      actorId: actorId ? Number(actorId) : null,
+      fromDepartmentId: null,
+      toDepartmentId: Number(departmentId),
+      fromLevel: null,
+      toLevel: positionLevel,
+      fromName: null,
+      toName: positionName || null,
+      effectiveDate: startedAt ? new Date(startedAt) : new Date(),
+      reason: "assign",
+    },
   });
 
-  return ud;
+  return created;
 }
 
-/** เปลี่ยนระดับตำแหน่ง + ลง log */
+/* ---------------- End or Rename ---------------- */
+export async function endOrRenameAssignmentService({
+  prisma = defaultPrisma,
+  actorId,
+  id,
+  endedAt,
+  newPositionName,
+  reason,
+  effectiveDate,
+}) {
+  const ud = await prisma.userDepartment.findUnique({
+    where: { id: Number(id) },
+    select: {
+      id: true,
+      userId: true,
+      departmentId: true,
+      positionLevel: true,
+      positionName: true,
+      endedAt: true,
+      isActive: true,
+    },
+  });
+  if (!ud) throw AppError.notFound("ไม่พบ assignment");
+
+  const data = {};
+  let didEnd = false;
+
+  if (endedAt != null) {
+    data.endedAt = endedAt ? new Date(endedAt) : new Date();
+    data.isActive = false;
+    didEnd = true;
+  }
+  if (newPositionName !== undefined) {
+    data.positionName = newPositionName || null;
+  }
+
+  const updated = await prisma.userDepartment.update({
+    where: { id: ud.id },
+    data,
+    select: assignmentSelect,
+  });
+
+  // ถ้า end แล้วและเป็น primary → เคลียร์
+  if (didEnd) {
+    await prisma.user.updateMany({
+      where: { id: ud.userId, primaryUserDeptId: ud.id },
+      data: { primaryUserDeptId: null },
+    });
+  }
+
+  // Log (TRANSFER)
+  await prisma.positionChangeLog.create({
+    data: {
+      kind: "TRANSFER",
+      userId: ud.userId,
+      actorId: actorId ? Number(actorId) : null,
+      fromDepartmentId: ud.departmentId,
+      toDepartmentId: ud.departmentId,
+      fromLevel: ud.positionLevel,
+      toLevel: ud.positionLevel,
+      fromName: ud.positionName || null,
+      toName: newPositionName !== undefined ? (newPositionName || null) : (ud.positionName || null),
+      effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
+      reason: reason || (didEnd ? "end" : "rename"),
+    },
+  });
+
+  return updated;
+}
+
+/* ---------------- Change level ---------------- */
 export async function changeLevelService({
   prisma = defaultPrisma,
-  udId,
-  newLevel,
-  actorId = null,
-  effectiveDate = new Date(),
-  reason = null,
+  actorId,
+  id,
+  toLevel,
   newPositionName,
+  reason,
+  effectiveDate,
 }) {
-  const tx = prisma;
-  const ud = await getUdWithJoins(tx, udId);
-  const toLevel = normalizeLevel(newLevel);
+  if (!toLevel) throw AppError.badRequest("ต้องระบุ toLevel");
 
+  const ud = await prisma.userDepartment.findUnique({
+    where: { id: Number(id) },
+    select: {
+      id: true,
+      userId: true,
+      departmentId: true,
+      positionLevel: true,
+      positionName: true,
+      endedAt: true,
+      isActive: true,
+    },
+  });
+  if (!ud) throw AppError.notFound("ไม่พบ assignment");
+  if (!ud.isActive || ud.endedAt) throw AppError.badRequest("Assignment นี้สิ้นสุดแล้ว");
+
+  // กำหนด kind จากลำดับชั้น ✅
+  const fromIdx = levelRank(ud.positionLevel);
+  const toIdx = levelRank(toLevel);
+  if (toIdx < 0) throw AppError.badRequest("toLevel ไม่ถูกต้อง");
+  const kind = toIdx > fromIdx ? "PROMOTE" : (toIdx < fromIdx ? "DEMOTE" : "TRANSFER");
+
+  // กัน MD ซ้ำ
   if (toLevel === "MD") {
-    await assertNoOtherActiveMD({
-      prisma: tx,
-      departmentId: ud.departmentId,
-      exceptUserId: ud.userId,
+    const mdExists = await prisma.userDepartment.findFirst({
+      where: {
+        departmentId: ud.departmentId,
+        positionLevel: "MD",
+        isActive: true,
+        endedAt: null,
+        NOT: { id: ud.id },
+      },
+      select: { id: true },
     });
+    if (mdExists) throw AppError.conflict("แผนกนี้มี MD อยู่แล้ว");
   }
 
-  const updated = await tx.$transaction(async (trx) => {
-    const rec = await trx.userDepartment.update({
+  const updated = await prisma.$transaction(async (trx) => {
+    const upd = await trx.userDepartment.update({
       where: { id: ud.id },
       data: {
         positionLevel: toLevel,
-        ...(newPositionName !== undefined
-          ? { positionName: newPositionName || null }
-          : {}),
+        positionName:
+          newPositionName !== undefined ? (newPositionName || null) : ud.positionName || null,
       },
-      include: { department: true },
+      select: assignmentSelect,
     });
 
     await trx.positionChangeLog.create({
       data: {
-        kind: "PROMOTE", // default; จะ map จาก rank ก็ได้ถ้าต้องการ
+        kind, // ✅ PROMOTE/DEMOTE/TRANSFER
         userId: ud.userId,
         actorId: actorId ? Number(actorId) : null,
         fromDepartmentId: ud.departmentId,
@@ -146,102 +299,59 @@ export async function changeLevelService({
         toLevel,
         fromName: ud.positionName || null,
         toName:
-          newPositionName !== undefined
-            ? newPositionName || null
-            : ud.positionName || null,
+          newPositionName !== undefined ? (newPositionName || null) : ud.positionName || null,
         effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
-        reason: reason || null,
+        reason: reason || "change-level",
       },
     });
 
-    return rec;
+    return upd;
   });
 
   return updated;
 }
 
-/** เปลี่ยนชื่อ/ยุติความสัมพันธ์ (end) */
-export async function endOrRenameAssignmentService({
-  prisma = defaultPrisma,
-  udId,
-  positionName, // optional
-  endedAt, // optional
-}) {
-  const tx = prisma;
-  const now = new Date();
-  const data = {};
-  if (positionName !== undefined) data.positionName = positionName || null;
-  if (endedAt !== undefined) {
-    const ended = endedAt ? new Date(endedAt) : now;
-    data.endedAt = ended;
-    data.isActive = false;
-  }
-
-  const updated = await tx.userDepartment.update({
-    where: { id: Number(udId) },
-    data,
-    include: { department: true },
-  });
-
-  if (updated.endedAt) {
-    const owner = await tx.user.findFirst({
-      where: { primaryUserDeptId: updated.id },
-      select: { id: true },
-    });
-    if (owner) {
-      await tx.user.update({
-        where: { id: owner.id },
-        data: { primaryUserDeptId: null },
-      });
-    }
-  }
-
-  return updated;
-}
-
-/** ดึง assignments ของผู้ใช้ */
-export async function listAssignmentsByUser({
-  prisma = defaultPrisma,
-  userId,
-  activeOnly = false,
-}) {
-  const where = { userId: Number(userId) };
-  if (activeOnly) Object.assign(where, { endedAt: null, isActive: true });
-
-  return prisma.userDepartment.findMany({
-    where,
-    orderBy: [{ endedAt: "asc" }, { startedAt: "desc" }],
-    include: {
-      department: {
-        select: { id: true, code: true, nameTh: true, nameEn: true },
-      },
+/* ---------------- Set primary ---------------- */
+export async function setPrimaryAssignmentService({ prisma = defaultPrisma, actorId, id }) {
+  const ud = await prisma.userDepartment.findUnique({
+    where: { id: Number(id) },
+    select: {
+      id: true,
+      userId: true,
+      departmentId: true,
+      positionLevel: true,
+      positionName: true,
+      endedAt: true,
+      isActive: true,
     },
   });
-}
+  if (!ud) throw AppError.notFound("ไม่พบ assignment");
+  if (!ud.isActive || ud.endedAt) throw AppError.badRequest("ต้องเป็น assignment ที่ยัง active");
 
-export async function listAssignmentsService(opts) {
-  return listAssignmentsByUser(opts);
-}
+  await prisma.user.update({
+    where: { id: ud.userId },
+    data: { primaryUserDeptId: ud.id },
+  });
 
-/** ตั้ง assignment เป็น primary ของผู้ใช้ (ต้องเป็น active) */
-export async function setPrimaryAssignmentService({
-  prisma = defaultPrisma,
-  userId,
-  udId,
-}) {
-  const tx = prisma;
-  const uid = Number(userId);
-  const rec = await tx.userDepartment.findFirst({
-    where: { id: Number(udId), userId: uid, endedAt: null, isActive: true },
-    select: { id: true },
+  await prisma.positionChangeLog.create({
+    data: {
+      kind: "TRANSFER",
+      userId: ud.userId,
+      actorId: actorId ? Number(actorId) : null,
+      fromDepartmentId: ud.departmentId,
+      toDepartmentId: ud.departmentId,
+      fromLevel: ud.positionLevel,
+      toLevel: ud.positionLevel,
+      fromName: ud.positionName || null,
+      toName: ud.positionName || null,
+      effectiveDate: new Date(),
+      reason: "set-primary",
+    },
   });
-  if (!rec)
-    throw AppError.badRequest(
-      "ต้องเป็น assignment ที่ active ของผู้ใช้เท่านั้น"
-    );
-  await tx.user.update({
-    where: { id: uid },
-    data: { primaryUserDeptId: rec.id },
+
+  const updated = await prisma.userDepartment.findUnique({
+    where: { id: ud.id },
+    select: assignmentSelect,
   });
-  return { ok: true };
+  return updated;
 }

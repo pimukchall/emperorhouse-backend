@@ -1,15 +1,13 @@
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
 import { env } from "#config/env.js";
-import { prisma } from "#lib/prisma.js";
 
-const ACCESS_SECRET  = env.JWT_ACCESS_SECRET;
+const ACCESS_SECRET = env.JWT_ACCESS_SECRET;
 const REFRESH_SECRET = env.JWT_REFRESH_SECRET;
 
-const ACCESS_TTL_SEC  = Number(env.ACCESS_TTL_SEC);
-const REFRESH_TTL_SEC = Number(env.REFRESH_TTL_SEC);
+const ACCESS_TTL_SEC = Number(env.ACCESS_TTL_SEC || 600); // default 10 นาที
+const REFRESH_TTL_SEC = Number(env.REFRESH_TTL_SEC || 1209600); // default 14 วัน
 
-const ACCESS_TTL  = `${ACCESS_TTL_SEC}s`;
+const ACCESS_TTL = `${ACCESS_TTL_SEC}s`;
 const REFRESH_TTL = `${REFRESH_TTL_SEC}s`;
 
 const AUTH_COOKIE_PATH = "/api/auth";
@@ -22,80 +20,15 @@ export function verifyAccessToken(token) {
   return jwt.verify(token, ACCESS_SECRET);
 }
 
-/* ----------------------------- Refresh Token (DB) ----------------------------- */
-/**
- * สร้าง refresh token ที่มี jti + บันทึก DB พร้อมวันหมดอายุ
- * NOTE: payload คาดหวังว่ามี sub (user id)
- */
-export async function signRefreshToken(payload = {}, opts = {}) {
-  const jti = crypto.randomBytes(16).toString("hex");
-  const token = jwt.sign({ ...payload, jti }, REFRESH_SECRET, { expiresIn: REFRESH_TTL, ...opts });
-
-  const sub = Number(payload?.sub);
-  if (!sub || Number.isNaN(sub)) {
-    // แม้จะเซ็นโทเคนได้ แต่เพื่อความถูกต้องของระบบ rotate/revoke ต้องมี userId
-    throw new Error("signRefreshToken: missing payload.sub (userId)");
-  }
-
-  const expiresAt = new Date(Date.now() + REFRESH_TTL_SEC * 1000);
-  await prisma.refreshToken.create({
-    data: {
-      jti,
-      userId: sub,
-      expiresAt,
-    },
-  });
-
-  return token;
+/* ------------------------------- Refresh Token -------------------------------- */
+export function signRefreshToken(payload = {}, opts = {}) {
+  return jwt.sign(payload, REFRESH_SECRET, { expiresIn: REFRESH_TTL, ...opts });
+}
+export function verifyRefreshToken(token) {
+  return jwt.verify(token, REFRESH_SECRET);
 }
 
-/**
- * ตรวจสอบ refresh token + เช็คกับ DB ว่า revoked/หมดอายุหรือไม่
- * คืน decoded ที่ผ่านการตรวจสอบแล้ว
- */
-export async function verifyRefreshToken(token) {
-  const decoded = jwt.verify(token, REFRESH_SECRET);
-  const jti = decoded?.jti;
-  if (!jti) throw new Error("verifyRefreshToken: missing jti");
-
-  const rec = await prisma.refreshToken.findUnique({ where: { jti } });
-  if (!rec) throw new Error("refresh token not found");
-  if (rec.revoked) throw new Error("refresh token revoked");
-  if (rec.expiresAt.getTime() < Date.now()) throw new Error("refresh token expired");
-
-  return decoded; // { sub, jti, iat, exp, ... }
-}
-
-/** ยกเลิก refresh token โดย jti */
-export async function revokeRefreshTokenByJti(jti, replacedBy = null) {
-  if (!jti) return;
-  await prisma.refreshToken.updateMany({
-    where: { jti, revoked: false },
-    data: { revoked: true, replacedBy: replacedBy || null },
-  });
-}
-
-/**
- * หมุน refresh token (rotate):
- * 1) verify โทเคนเก่า (เช็ค DB)
- * 2) revoke โทเคนเก่า
- * 3) sign โทเคนใหม่ + บันทึก DB
- * คืน { oldDecoded, newToken, newDecoded }
- */
-export async function rotateRefreshToken(oldToken) {
-  const oldDecoded = await verifyRefreshToken(oldToken);
-  const sub = oldDecoded?.sub;
-  const newToken = await signRefreshToken({ sub });
-  // เชื่อมความสัมพันธ์เก่า/ใหม่
-  await prisma.refreshToken.update({
-    where: { jti: oldDecoded.jti },
-    data: { revoked: true, replacedBy: jwt.decode(newToken)?.jti || null },
-  });
-  const newDecoded = jwt.decode(newToken);
-  return { oldDecoded, newToken, newDecoded };
-}
-
-/* --------------------------------- Cookies ---------------------------------- */
+/* ----------------------------------- Cookie ----------------------------------- */
 export function setRefreshCookie(res, token) {
   res.cookie("refresh_token", token, {
     httpOnly: true,
@@ -109,7 +42,7 @@ export function clearRefreshCookie(res) {
   res.clearCookie("refresh_token", { path: AUTH_COOKIE_PATH });
 }
 
-/* --------------------------------- Helpers ---------------------------------- */
+/* ---------------------------------- Helpers ----------------------------------- */
 export function readBearer(req) {
   const h = req.headers?.authorization || "";
   const m = /^Bearer\s+(.+)$/i.exec(h);
