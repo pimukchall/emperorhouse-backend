@@ -20,19 +20,15 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "start:system": "node src/server.js",
-
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:reset": "prisma migrate reset --force",
     "db:seed": "node prisma/seed.js",
-
     "db:check": "prisma validate",
     "prisma:studio": "prisma studio",
-
     "lint": "eslint . || echo \"(no eslint configured)\"",
     "typecheck": "node -e \"console.log('JS project – no TS typecheck')\"",
-
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -40,7 +36,7 @@
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
-    "dotenv-cli": "^10.0.0",
+    "dotenv": "^17.2.3",
     "envalid": "^8.1.0",
     "express": "^5.1.0",
     "helmet": "^7.2.0",
