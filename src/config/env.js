@@ -59,7 +59,7 @@ function parseOrigins(input) {
  */
 export function getCorsOptions() {
   const list = new Set(parseOrigins(env.CORS_ORIGINS));
-  list.add(env.FRONTEND_BASE_URL); // เผื่อคนลืมใส่ซ้ำ
+  list.add(env.FRONTEND_BASE_URL);
   const origins = Array.from(list);
 
   return {

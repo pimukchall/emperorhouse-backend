@@ -1,10 +1,9 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-
 import helmet from "helmet";
 
-import { env } from "#config/env.js";
+import { env, getCorsOptions } from "#config/env.js";
 import { httpLogger } from "#lib/logger.js";
 import { ensureUploadDirs, UPLOADS_BASE } from "#lib/paths.js";
 import { notFound, errorHandler } from "#mw/error.js";
@@ -37,8 +36,8 @@ app.use(
 );
 
 // Logger + CORS + parsers
-// app.use(httpLogger);
-app.use(cors({ origin: env.FRONTEND_BASE_URL, credentials: true }));
+app.use(httpLogger);
+app.use(cors(getCorsOptions()));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
