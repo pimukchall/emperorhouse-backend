@@ -88,13 +88,16 @@ model Organization {
 model User {
   id Int @id @default(autoincrement())
 
-  // ชื่อแสดงผลรวม (optional), แยก first/last ไทย/อังกฤษด้านล่าง
-  name         String  @default("") @db.VarChar(160)
+  // ใช้ username สำหรับเข้าสู่ระบบ (บังคับไม่ซ้ำ)
+  username     String  @unique @db.VarChar(40)
 
-  // Active-unique (เช็คใน service): email ห้ามซ้ำในแถวที่ deletedAt = NULL
-  email        String  @db.VarChar(160)
+  // Email สำหรับติดต่อ (optional, ไม่บังคับ unique)
+  email        String? @db.VarChar(160)
 
   passwordHash String  @db.VarChar(255)
+
+    // ชื่อแสดงผลรวม (optional), แยก first/last ไทย/อังกฤษด้านล่าง
+  name         String  @default("") @db.VarChar(160)
 
   // ชื่อ-นามสกุล 2 ภาษา (ใช้สำหรับเอกสารราชการ/รายงาน)
   firstNameTh String @db.VarChar(120)
@@ -151,14 +154,15 @@ model User {
 
   // Active-unique แบบ A (guard ใน service)
   @@unique([employeeCode, deletedAt])
-  @@unique([email, deletedAt])
 
   // คิวรีช่วยงานรีพอร์ต
+  @@index([email])
   @@index([employeeType])
   @@index([contractType])
   @@index([startDate])
   @@index([resignedAt])
   @@index([deletedAt])
+  @@index([roleId, deletedAt])
 }
 
 // ================================

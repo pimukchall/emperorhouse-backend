@@ -3,6 +3,98 @@ import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
+/* ----------------------------- Utils & helpers ---------------------------- */
+
+function envOrThrow(name, allowEmpty = false) {
+  const v = process.env[name];
+  if (!allowEmpty && (!v || !String(v).trim())) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return v ?? null;
+}
+
+async function hashPassword(raw) {
+  const rounds = Number(process.env.BCRYPT_SALT_ROUNDS ?? 10);
+  return bcrypt.hash(raw, rounds);
+}
+
+/**
+ * Ensure a user (active, not soft-deleted) exists by username.
+ * - Creates user if not exists
+ * - Ensures active UserDepartment in given department
+ * - Ensures primaryUserDept is set to that UD
+ * - Email is optional (nullable) per new schema
+ */
+async function ensureUserWithActiveDept({
+  username,
+  email, // optional
+  passwordPlain,
+  profile, // { firstNameTh, lastNameTh, firstNameEn, lastNameEn }
+  roleId,
+  orgId,
+  employee,
+  dept, // { id, positionLevel, positionName }
+}) {
+  // 1) Find or create user (active only)
+  let user = await prisma.user.findFirst({
+    where: { username, deletedAt: null },
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        username,
+        email: email && email.trim() ? email : null, // optional
+        passwordHash: await hashPassword(passwordPlain),
+        firstNameTh: profile.firstNameTh,
+        lastNameTh: profile.lastNameTh,
+        firstNameEn: profile.firstNameEn,
+        lastNameEn: profile.lastNameEn,
+        roleId,
+        orgId,
+        employeeCode: employee.employeeCode ?? null,
+        employeeType: employee.employeeType ?? null,
+        contractType: employee.contractType ?? null,
+        startDate: employee.startDate ?? new Date(),
+      },
+    });
+  }
+
+  // 2) Ensure active UserDepartment for this department
+  let ud = await prisma.userDepartment.findFirst({
+    where: {
+      userId: user.id,
+      departmentId: dept.id,
+      isActive: true,
+    },
+  });
+
+  if (!ud) {
+    ud = await prisma.userDepartment.create({
+      data: {
+        userId: user.id,
+        departmentId: dept.id,
+        positionLevel: dept.positionLevel, // "STAFF" | "MANAGER" | ...
+        positionName: dept.positionName ?? null,
+        startedAt: new Date(),
+        isActive: true,
+      },
+    });
+  }
+
+  // 3) Set primary if not set or different
+  if (!user.primaryUserDeptId || user.primaryUserDeptId !== ud.id) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { primaryUserDeptId: ud.id },
+    });
+  }
+
+  return { user, ud };
+}
+
+/* ------------------------------ Master seeding ----------------------------- */
+
 async function ensureMasters() {
   // Roles
   const roles = [
@@ -25,26 +117,14 @@ async function ensureMasters() {
     { code: "CS", nameTh: "บริการลูกค้า", nameEn: "Customer Service" },
     { code: "AD", nameTh: "สถาปัตยกรรม", nameEn: "Architectural Design" },
     { code: "DD", nameTh: "ออกแบบ", nameEn: "Design Development" },
-    {
-      code: "CM",
-      nameTh: "บริหารงานก่อสร้าง",
-      nameEn: "Construction Management",
-    },
+    { code: "CM", nameTh: "บริหารงานก่อสร้าง", nameEn: "Construction Management" },
     { code: "CO", nameTh: "การดำเนินงานลูกค้า", nameEn: "Customer Operations" },
     { code: "QS", nameTh: "ประเมินราคา", nameEn: "Quantity Surveyor" },
     { code: "PU", nameTh: "จัดซื้อ", nameEn: "Procurement" },
     { code: "AC", nameTh: "บัญชี", nameEn: "Accounts" },
     { code: "HR", nameTh: "ทรัพยากรบุคคล", nameEn: "Human Resources" },
-    {
-      code: "IT",
-      nameTh: "เทคโนโลยีสารสนเทศ",
-      nameEn: "Information Technology",
-    },
-    {
-      code: "QMS",
-      nameTh: "ระบบบริหารคุณภาพ",
-      nameEn: "Quality Management System",
-    },
+    { code: "IT", nameTh: "เทคโนโลยีสารสนเทศ", nameEn: "Information Technology" },
+    { code: "QMS", nameTh: "ระบบบริหารคุณภาพ", nameEn: "Quality Management System" },
     { code: "MGT", nameTh: "ฝ่ายบริหาร", nameEn: "Management" },
     { code: "TAU", nameTh: "Taurus", nameEn: "Taurus" },
     { code: "LA", nameTh: "Leo Angelo", nameEn: "Leo Angelo" },
@@ -76,43 +156,15 @@ async function ensureMasters() {
     { code: "11000", nameTh: "ฝ่ายขาย", nameEn: "Sales" },
     { code: "11001", nameTh: "โกดังสายไหม", nameEn: "Warehouse Saimai" },
     { code: "20000", nameTh: "ฝ่ายการตลาด", nameEn: "Marketing" },
-    {
-      code: "21000",
-      nameTh: "ฝ่ายขาย และบริการลูกค้า (Acara)",
-      nameEn: "Sales & Customer Service (Acara)",
-    },
-    {
-      code: "22000",
-      nameTh: "ฝ่ายขาย และบริการลูกค้า (Emperor)",
-      nameEn: "Sales & Customer Service (Emperor)",
-    },
+    { code: "21000", nameTh: "ฝ่ายขาย และบริการลูกค้า (Acara)", nameEn: "Sales & Customer Service (Acara)" },
+    { code: "22000", nameTh: "ฝ่ายขาย และบริการลูกค้า (Emperor)", nameEn: "Sales & Customer Service (Emperor)" },
     { code: "30000", nameTh: "ฝ่ายทรัพยากรมนุษย์", nameEn: "Human Resources" },
-    {
-      code: "41000",
-      nameTh: "ฝ่ายออกแบบสถาปัตยกรรม",
-      nameEn: "Architectural Design",
-    },
-    {
-      code: "42000",
-      nameTh: "ฝ่ายออกแบบตกแต่งภายใน",
-      nameEn: "Interior Design",
-    },
-    {
-      code: "50000",
-      nameTh: "ฝ่ายบัญชีการเงิน",
-      nameEn: "Accounting & Finance",
-    },
-    {
-      code: "60000",
-      nameTh: "ฝ่ายเทคโนโลยีสารสนเทศ",
-      nameEn: "Information Technology",
-    },
+    { code: "41000", nameTh: "ฝ่ายออกแบบสถาปัตยกรรม", nameEn: "Architectural Design" },
+    { code: "42000", nameTh: "ฝ่ายออกแบบตกแต่งภายใน", nameEn: "Interior Design" },
+    { code: "50000", nameTh: "ฝ่ายบัญชีการเงิน", nameEn: "Accounting & Finance" },
+    { code: "60000", nameTh: "ฝ่ายเทคโนโลยีสารสนเทศ", nameEn: "Information Technology" },
     { code: "70000", nameTh: "ฝ่ายบริหารกฎหมาย", nameEn: "Legal Department" },
-    {
-      code: "80000",
-      nameTh: "ฝ่ายประเมินราคาและจัดซื้อ",
-      nameEn: "Procurement & Estimation",
-    },
+    { code: "80000", nameTh: "ฝ่ายประเมินราคาและจัดซื้อ", nameEn: "Procurement & Estimation" },
     { code: "Leo10000", nameTh: "ฝ่ายโชว์รูม", nameEn: "Showroom" },
   ];
   await Promise.all(
@@ -125,6 +177,7 @@ async function ensureMasters() {
     )
   );
 
+  // EvalCycle (MID_YEAR ของปีปัจจุบัน)
   const year = new Date().getFullYear();
   await prisma.evalCycle.upsert({
     where: { code: `${year}_MID_YEAR` },
@@ -141,134 +194,106 @@ async function ensureMasters() {
   });
 }
 
-async function ensureUserWithActiveDept({
-  email,
-  data,
-  deptId,
-  positionLevel,
-  positionName,
-}) {
-  // หา user ที่ยังไม่ถูกลบ (deletedAt = null)
-  let user = await prisma.user.findFirst({ where: { email, deletedAt: null } });
-  if (!user) {
-    user = await prisma.user.create({ data });
-  }
+/* -------------------------------- User seeding ------------------------------- */
 
-  // หา assignment ที่ active (endedAt = null) ในแผนกนั้น
-  let ud = await prisma.userDepartment.findFirst({
-    where: { userId: user.id, departmentId: deptId, endedAt: null },
-  });
-  if (!ud) {
-    ud = await prisma.userDepartment.create({
-      data: {
-        userId: user.id,
-        departmentId: deptId,
-        positionLevel,
-        positionName,
-        startedAt: new Date(),
-      },
-    });
-  }
-
-  // ตั้งเป็น primary ถ้ายังไม่ตั้งหรือคนละแผนก
-  if (!user.primaryUserDeptId || user.primaryUserDeptId !== ud.id) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { primaryUserDeptId: ud.id },
-    });
-  }
-
-  return { user, ud };
-}
-
-async function seedAdminAndQMR() {
-  const adminEmail = "admin@example.com";
-  const qmrEmail = "qmr@example.com";
-
-  const [adminRole, userRole, qmsDept, orgHR] = await Promise.all([
+async function seedUsers() {
+  const [roleAdmin, roleUser, deptQMS, deptIT, orgHR] = await Promise.all([
     prisma.role.findUnique({ where: { name: "admin" } }),
     prisma.role.findUnique({ where: { name: "user" } }),
     prisma.department.findUnique({ where: { code: "QMS" } }),
+    prisma.department.findUnique({ where: { code: "IT" } }),
     prisma.organization.findUnique({ where: { code: "30000" } }),
   ]);
-  if (!adminRole || !userRole || !qmsDept || !orgHR) {
-    throw new Error(
-      "Missing masters: role/admin|user or department/QMS or organization/30000"
-    );
+  if (!roleAdmin || !roleUser || !deptQMS || !deptIT || !orgHR) {
+    throw new Error("Missing masters: role/admin|user or department/QMS|IT or organization/30000");
   }
 
   // Admin (role=admin, MD @ QMS)
   await ensureUserWithActiveDept({
-    email: adminEmail,
-    data: {
-      email: adminEmail,
-      passwordHash: await bcrypt.hash("Admin@12345", 10),
+    username: envOrThrow("SEED_ADMIN_USERNAME"),
+    email: process.env.SEED_ADMIN_EMAIL ?? null,  // optional
+    passwordPlain: envOrThrow("SEED_ADMIN_PASSWORD"),
+    profile: {
       firstNameTh: "แอดมิน",
       lastNameTh: "ระบบ",
       firstNameEn: "System",
       lastNameEn: "Admin",
-      roleId: adminRole.id,
-      orgId: orgHR.id,
+    },
+    roleId: roleAdmin.id,
+    orgId: orgHR.id,
+    employee: {
       employeeCode: "6801",
       employeeType: "MONTHLY",
       contractType: "PERMANENT",
       startDate: new Date(),
     },
-    deptId: qmsDept.id,
-    positionLevel: "MD",
-    positionName: "Managing Director",
+    dept: {
+      id: deptQMS.id,
+      positionLevel: "MD",
+      positionName: "Managing Director",
+    },
   });
 
   // QMR (role=user, MANAGER @ QMS)
   await ensureUserWithActiveDept({
-    email: qmrEmail,
-    data: {
-      email: qmrEmail,
-      passwordHash: await bcrypt.hash("Qmr@12345", 10),
+    username: envOrThrow("SEED_QMR_USERNAME"),
+    email: process.env.SEED_QMR_EMAIL ?? null, // optional
+    passwordPlain: envOrThrow("SEED_QMR_PASSWORD"),
+    profile: {
       firstNameTh: "ผู้แทน",
       lastNameTh: "บริหารคุณภาพ",
       firstNameEn: "Quality",
       lastNameEn: "Representative",
-      roleId: userRole.id,
-      orgId: orgHR.id,
+    },
+    roleId: roleUser.id,
+    orgId: orgHR.id,
+    employee: {
       employeeCode: "6802",
       employeeType: "MONTHLY",
       contractType: "PERMANENT",
       startDate: new Date(),
     },
-    deptId: qmsDept.id,
-    positionLevel: "MANAGER",
-    positionName: "QMR",
+    dept: {
+      id: deptQMS.id,
+      positionLevel: "MANAGER",
+      positionName: "QMR",
+    },
   });
 
-  const itDept = await prisma.department.findUnique({ where: { code: "IT" } });
-await ensureUserWithActiveDept({
-  email: "staff.it@example.com",
-  data: {
-    email: "staff.it@example.com",
-    passwordHash: await bcrypt.hash("Staff@12345", 10),
-    firstNameTh: "พนักงาน",
-    lastNameTh: "ไอที",
-    firstNameEn: "IT",
-    lastNameEn: "Staff",
-    roleId: userRole.id,
+  // IT Staff (role=user, STAFF @ IT)
+  await ensureUserWithActiveDept({
+    username: envOrThrow("SEED_IT_USERNAME"),
+    email: process.env.SEED_IT_EMAIL ?? null, // optional
+    passwordPlain: envOrThrow("SEED_IT_PASSWORD"),
+    profile: {
+      firstNameTh: "พนักงาน",
+      lastNameTh: "ไอที",
+      firstNameEn: "IT",
+      lastNameEn: "Staff",
+    },
+    roleId: roleUser.id,
     orgId: orgHR.id,
-    employeeCode: "9901",
-    employeeType: "MONTHLY",
-    contractType: "PERMANENT",
-    startDate: new Date(),
-  },
-  deptId: itDept.id,
-  positionLevel: "STAF",
-  positionName: "Developer",
-});
+    employee: {
+      employeeCode: "9901",
+      employeeType: "MONTHLY",
+      contractType: "PERMANENT",
+      startDate: new Date(),
+    },
+    dept: {
+      id: deptIT.id,
+      positionLevel: "STAFF",
+      positionName: "Developer",
+    },
+  });
 
-  console.log("✅ Seeded admin & QMR");
+  console.log("✅ Seeded users (admin, qmr, it staff)");
 }
+
+/* --------------------------------- Entrypoint -------------------------------- */
 
 async function main() {
   await ensureMasters();
-  await seedAdminAndQMR();
+  await seedUsers();
 }
 
 main()
