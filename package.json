@@ -17,32 +17,33 @@
     "#config/*": "./src/config/*"
   },
   "scripts": {
-    "dev": "dotenv -e .env.development -- nodemon src/server.js",
-    "start": "dotenv -e .env.production -- node src/server.js",
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
     "start:system": "node src/server.js",
-    "db:generate:dev": "dotenv -e .env.development -- prisma generate",
-    "db:migrate:dev": "dotenv -e .env.development -- prisma migrate dev",
-    "db:push:dev": "dotenv -e .env.development -- prisma db push",
-    "db:reset:dev": "dotenv -e .env.development -- prisma migrate reset --force",
-    "db:seed:dev": "dotenv -e .env.development -- node prisma/seed.js",
-    "db:generate:prod": "dotenv -e .env.production -- prisma generate",
-    "db:migrate:deploy": "dotenv -e .env.production -- prisma migrate deploy",
-    "db:seed:prod": "dotenv -e .env.production -- node prisma/seed.js",
+
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:reset": "prisma migrate reset --force",
+    "db:seed": "node prisma/seed.js",
+
     "db:check": "prisma validate",
-    "prisma:studio:dev": "dotenv -e .env.development -- prisma studio",
-    "prisma:studio:prod": "dotenv -e .env.production -- prisma studio",
+    "prisma:studio": "prisma studio",
+
     "lint": "eslint . || echo \"(no eslint configured)\"",
     "typecheck": "node -e \"console.log('JS project – no TS typecheck')\"",
+
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^6.16.2",
+    "@prisma/client": "^6.16.3",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv-cli": "^10.0.0",
     "envalid": "^8.1.0",
     "express": "^5.1.0",
-    "helmet": "^0.14.0",
+    "helmet": "^7.2.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.6",
@@ -55,9 +56,8 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
-    "dotenv-cli": "^10.0.0",
     "nodemon": "^3.1.10",
     "pino-pretty": "^13.1.1",
-    "prisma": "^6.16.2"
+    "prisma": "^6.16.3"
   }
 }

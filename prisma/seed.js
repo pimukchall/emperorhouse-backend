@@ -167,14 +167,23 @@ async function ensureMasters() {
     { code: "80000", nameTh: "ฝ่ายประเมินราคาและจัดซื้อ", nameEn: "Procurement & Estimation" },
     { code: "Leo10000", nameTh: "ฝ่ายโชว์รูม", nameEn: "Showroom" },
   ];
+
   await Promise.all(
-    organizations.map((o) =>
-      prisma.organization.upsert({
-        where: { code: o.code },
-        update: { nameTh: o.nameTh, nameEn: o.nameEn },
-        create: o,
-      })
-    )
+    organizations.map(async (o) => {
+      const existing = await prisma.organization.findFirst({
+        where: { code: o.code, deletedAt: null },
+      });
+      if (existing) {
+        await prisma.organization.update({
+          where: { id: existing.id },
+          data: { nameTh: o.nameTh, nameEn: o.nameEn },
+        });
+      } else {
+        await prisma.organization.create({
+          data: { ...o, deletedAt: null },
+        });
+      }
+    })
   );
 
   // EvalCycle (MID_YEAR ของปีปัจจุบัน)
@@ -202,7 +211,7 @@ async function seedUsers() {
     prisma.role.findUnique({ where: { name: "user" } }),
     prisma.department.findUnique({ where: { code: "QMS" } }),
     prisma.department.findUnique({ where: { code: "IT" } }),
-    prisma.organization.findUnique({ where: { code: "30000" } }),
+    prisma.organization.findFirst({ where: { code: "30000", deletedAt: null } }), // ← เปลี่ยนเป็น findFirst
   ]);
   if (!roleAdmin || !roleUser || !deptQMS || !deptIT || !orgHR) {
     throw new Error("Missing masters: role/admin|user or department/QMS|IT or organization/30000");

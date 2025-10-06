@@ -13,30 +13,67 @@ datasource db {
 // ================================
 // Enums (ค่าคงที่ใช้ซ้ำทั้งระบบ)
 // ================================
-enum Gender { MALE FEMALE OTHER UNSPECIFIED }
-enum EmployeeType { DAILY MONTHLY }
-enum ContractType { PERMANENT TEMPORARY PROBATION }
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNSPECIFIED
+}
 
-// NOTE: ใช้ STAFF (ไม่ใช่ STAF) กันสะกดผิด
-enum PositionLevel { STAFF SVR ASST MANAGER MD }
+enum EmployeeType {
+  DAILY
+  MONTHLY
+}
 
-enum PositionChangeKind { PROMOTE DEMOTE TRANSFER }
+enum ContractType {
+  PERMANENT
+  TEMPORARY
+  PROBATION
+}
+
+enum PositionLevel {
+  STAFF
+  SVR
+  ASST
+  MANAGER
+  MD
+}
+
+enum PositionChangeKind {
+  PROMOTE
+  DEMOTE
+  TRANSFER
+}
 
 // ประเภท/รอบการประเมิน
-enum EvalType { OPERATIONAL SUPERVISOR }
-enum EvalStage { MID_YEAR YEAR_END }
+enum EvalType {
+  OPERATIONAL
+  SUPERVISOR
+}
+
+enum EvalStage {
+  MID_YEAR
+  YEAR_END
+}
 
 // สถานะการประเมิน (จับคู่กับ *_At ใน Evaluation ด้านล่าง)
-enum EvalStatus { DRAFT SUBMITTED APPROVER_APPROVED MD_APPROVED COMPLETED REJECTED }
+enum EvalStatus {
+  DRAFT
+  SUBMITTED
+  APPROVER_APPROVED
+  MD_APPROVED
+  COMPLETED
+  REJECTED
+}
 
 // ================================
 // Role: บทบาทผู้ใช้ (admin, hr, user, ...)
 // ================================
 model Role {
   id      Int    @id @default(autoincrement())
-  name    String @unique @db.VarChar(50)   // ชื่อสั้น ๆ ใช้อ้างอิงในโค้ด เช่น "admin"
-  labelTh String @db.VarChar(120)          // ป้ายภาษาไทยสำหรับ UI
-  labelEn String @db.VarChar(120)          // ป้ายภาษาอังกฤษสำหรับ UI
+  name    String @unique @db.VarChar(50) // ชื่อสั้น ๆ ใช้อ้างอิงในโค้ด เช่น "admin"
+  labelTh String @db.VarChar(120) // ป้ายภาษาไทยสำหรับ UI
+  labelEn String @db.VarChar(120) // ป้ายภาษาอังกฤษสำหรับ UI
   users   User[]
 
   createdAt DateTime @default(now())
@@ -48,7 +85,7 @@ model Role {
 // ================================
 model Department {
   id     Int    @id @default(autoincrement())
-  code   String @unique @db.VarChar(32)    // โค้ดแผนก เช่น HR, IT
+  code   String @unique @db.VarChar(32) // โค้ดแผนก เช่น HR, IT
   nameTh String @db.VarChar(120)
   nameEn String @db.VarChar(120)
 
@@ -67,10 +104,10 @@ model Department {
 // ================================
 model Organization {
   id        Int       @id @default(autoincrement())
-  code      String    @db.VarChar(32)      // โค้ดองค์กร เช่น ORG01
+  code      String    @db.VarChar(32) // โค้ดองค์กร เช่น ORG01
   nameTh    String    @db.VarChar(120)
   nameEn    String    @db.VarChar(120)
-  deletedAt DateTime?                      // soft-delete (NULL = ยังใช้งาน)
+  deletedAt DateTime? // soft-delete (NULL = ยังใช้งาน)
 
   users User[]
 
@@ -89,15 +126,15 @@ model User {
   id Int @id @default(autoincrement())
 
   // ใช้ username สำหรับเข้าสู่ระบบ (บังคับไม่ซ้ำ)
-  username     String  @unique @db.VarChar(40)
+  username String @unique @db.VarChar(40)
 
   // Email สำหรับติดต่อ (optional, ไม่บังคับ unique)
-  email        String? @db.VarChar(160)
+  email String? @db.VarChar(160)
 
-  passwordHash String  @db.VarChar(255)
+  passwordHash String @db.VarChar(255)
 
-    // ชื่อแสดงผลรวม (optional), แยก first/last ไทย/อังกฤษด้านล่าง
-  name         String  @default("") @db.VarChar(160)
+  // ชื่อแสดงผลรวม (optional), แยก first/last ไทย/อังกฤษด้านล่าง
+  name String @default("") @db.VarChar(160)
 
   // ชื่อ-นามสกุล 2 ภาษา (ใช้สำหรับเอกสารราชการ/รายงาน)
   firstNameTh String @db.VarChar(120)
@@ -113,9 +150,9 @@ model User {
   organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
   // การสังกัดแผนก (ประวัติ/หลายเรคอร์ด), และ primary link ไปยังเรคอร์ดหลัก
-  userDepartments UserDepartment[]
-  primaryUserDeptId Int?            @unique
-  primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id], onDelete: SetNull)
+  userDepartments   UserDepartment[]
+  primaryUserDeptId Int?             @unique
+  primaryUserDept   UserDepartment?  @relation("primary_of_user", fields: [primaryUserDeptId], references: [id], onDelete: SetNull)
 
   // Log เปลี่ยนตำแหน่ง/ผู้กระทำ
   positionChangeLogs      PositionChangeLog[] @relation("pcl_user")
@@ -149,12 +186,10 @@ model User {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  @@index([roleId])
-  @@index([orgId])
-
   // Active-unique แบบ A (guard ใน service)
   @@unique([employeeCode, deletedAt])
-
+  @@index([roleId])
+  @@index([orgId])
   // คิวรีช่วยงานรีพอร์ต
   @@index([email])
   @@index([employeeType])
@@ -178,11 +213,11 @@ model UserDepartment {
   department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
 
   positionLevel PositionLevel
-  positionName  String? @db.VarChar(120)   // ชื่อตำแหน่ง custom
+  positionName  String?       @db.VarChar(120) // ชื่อตำแหน่ง custom
 
   startedAt DateTime  @default(now())
   endedAt   DateTime?
-  isActive  Boolean   @default(true)       // record ปัจจุบันของแผนกนั้น
+  isActive  Boolean   @default(true) // record ปัจจุบันของแผนกนั้น
 
   // ชี้กลับจาก User.primaryUserDept
   primaryOfUser User? @relation("primary_of_user")
@@ -193,7 +228,6 @@ model UserDepartment {
   // กันซ้ำ: user 1 คน ไม่ให้มี record active ซ้ำใน "แผนกเดียวกัน"
   // (แต่ยัง active ได้หลายแผนก—ถ้าอยากให้ได้แค่แผนกเดียว ต้องบังคับใน service)
   @@unique([userId, departmentId, isActive])
-
   // ดัชนีที่ช่วยคิวรีทั่วไป
   @@index([userId, isActive])
   @@index([userId, departmentId])
@@ -224,11 +258,11 @@ model PositionChangeLog {
   fromLevel PositionLevel?
   toLevel   PositionLevel?
 
-  fromName String? @db.VarChar(120)        // ชื่อตำแหน่งก่อนหน้า (กรณี custom)
-  toName   String? @db.VarChar(120)        // ชื่อตำแหน่งใหม่ (กรณี custom)
+  fromName String? @db.VarChar(120) // ชื่อตำแหน่งก่อนหน้า (กรณี custom)
+  toName   String? @db.VarChar(120) // ชื่อตำแหน่งใหม่ (กรณี custom)
 
-  effectiveDate DateTime                   // วันที่มีผล
-  reason        String? @db.Text           // เหตุผล (Text รองรับข้อความยาว)
+  effectiveDate DateTime // วันที่มีผล
+  reason        String?  @db.Text // เหตุผล (Text รองรับข้อความยาว)
 
   createdAt DateTime @default(now())
 
@@ -246,7 +280,7 @@ model PasswordReset {
   userId    Int
   token     String    @unique @db.VarChar(255) // โทเค็นต้อง unique จริง
   expiresAt DateTime
-  usedAt    DateTime?                         // วันที่ใช้งาน (NULL = ยังไม่ใช้)
+  usedAt    DateTime? // วันที่ใช้งาน (NULL = ยังไม่ใช้)
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -282,8 +316,8 @@ model EvalCycle {
   stage       EvalStage
   openAt      DateTime
   closeAt     DateTime
-  isActive    Boolean   @default(true)         // เปิดใช้งานรอบนี้อยู่
-  isMandatory Boolean   @default(true)         // บังคับทุกคนหรือไม่
+  isActive    Boolean   @default(true) // เปิดใช้งานรอบนี้อยู่
+  isMandatory Boolean   @default(true) // บังคับทุกคนหรือไม่
 
   evaluations Evaluation[]
 
@@ -326,29 +360,29 @@ model Evaluation {
   rejectedAt  DateTime?
 
   // คะแนนย่อย (Decimal กัน floating error)
-  s1_responsibility  Decimal? @db.Decimal(5,2)
-  s1_development     Decimal? @db.Decimal(5,2)
-  s1_workload        Decimal? @db.Decimal(5,2)
-  s1_qualityStandard Decimal? @db.Decimal(5,2)
-  s1_coordination    Decimal? @db.Decimal(5,2)
+  s1_responsibility  Decimal? @db.Decimal(5, 2)
+  s1_development     Decimal? @db.Decimal(5, 2)
+  s1_workload        Decimal? @db.Decimal(5, 2)
+  s1_qualityStandard Decimal? @db.Decimal(5, 2)
+  s1_coordination    Decimal? @db.Decimal(5, 2)
 
-  s2_valueOfWork          Decimal? @db.Decimal(5,2)
-  s2_customerSatisfaction Decimal? @db.Decimal(5,2)
-  s2_costEffectiveness    Decimal? @db.Decimal(5,2)
-  s2_timeliness           Decimal? @db.Decimal(5,2)
+  s2_valueOfWork          Decimal? @db.Decimal(5, 2)
+  s2_customerSatisfaction Decimal? @db.Decimal(5, 2)
+  s2_costEffectiveness    Decimal? @db.Decimal(5, 2)
+  s2_timeliness           Decimal? @db.Decimal(5, 2)
 
-  s3_jobKnowledge         Decimal? @db.Decimal(5,2)
-  s3_attitude             Decimal? @db.Decimal(5,2)
-  s3_contextUnderstanding Decimal? @db.Decimal(5,2)
-  s3_systematicThinking   Decimal? @db.Decimal(5,2)
-  s3_decisionMaking       Decimal? @db.Decimal(5,2)
-  s3_adaptability         Decimal? @db.Decimal(5,2)
-  s3_leadership           Decimal? @db.Decimal(5,2)
-  s3_verbalComm           Decimal? @db.Decimal(5,2)
-  s3_writtenComm          Decimal? @db.Decimal(5,2)
-  s3_selflessness         Decimal? @db.Decimal(5,2)
-  s3_ruleCompliance       Decimal? @db.Decimal(5,2)
-  s3_selfReliance         Decimal? @db.Decimal(5,2)
+  s3_jobKnowledge         Decimal? @db.Decimal(5, 2)
+  s3_attitude             Decimal? @db.Decimal(5, 2)
+  s3_contextUnderstanding Decimal? @db.Decimal(5, 2)
+  s3_systematicThinking   Decimal? @db.Decimal(5, 2)
+  s3_decisionMaking       Decimal? @db.Decimal(5, 2)
+  s3_adaptability         Decimal? @db.Decimal(5, 2)
+  s3_leadership           Decimal? @db.Decimal(5, 2)
+  s3_verbalComm           Decimal? @db.Decimal(5, 2)
+  s3_writtenComm          Decimal? @db.Decimal(5, 2)
+  s3_selflessness         Decimal? @db.Decimal(5, 2)
+  s3_ruleCompliance       Decimal? @db.Decimal(5, 2)
+  s3_selfReliance         Decimal? @db.Decimal(5, 2)
 
   // คำอธิบาย/สรุป (Text รองรับยาว)
   t_potential           String? @db.Text
@@ -356,25 +390,25 @@ model Evaluation {
   t_trainingNeeds       String? @db.Text
 
   // คะแนนสรุป
-  scorePerf   Decimal? @db.Decimal(5,2)
-  scoreResult Decimal? @db.Decimal(5,2)
-  scoreComp   Decimal? @db.Decimal(5,2)
-  scoreTotal  Decimal? @db.Decimal(5,2)
+  scorePerf   Decimal? @db.Decimal(5, 2)
+  scoreResult Decimal? @db.Decimal(5, 2)
+  scoreComp   Decimal? @db.Decimal(5, 2)
+  scoreTotal  Decimal? @db.Decimal(5, 2)
 
   // ลายเซ็น/ความเห็นผู้เกี่ยวข้อง
-  submitterComment   String? @db.Text
+  submitterComment   String?   @db.Text
   submitterSignedAt  DateTime?
   submitterSignature Bytes?
 
-  managerComment   String? @db.Text
+  managerComment   String?   @db.Text
   managerSignedAt  DateTime?
   managerSignature Bytes?
 
-  mdComment   String? @db.Text
+  mdComment   String?   @db.Text
   mdSignedAt  DateTime?
   mdSignature Bytes?
 
-  hrNote       String? @db.Text
+  hrNote       String?   @db.Text
   hrReceivedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -382,7 +416,6 @@ model Evaluation {
 
   // 1 เจ้าของ 1 รอบ มี 1 ใบประเมิน
   @@unique([cycleId, ownerId])
-
   // ดัชนีช่วยคิวรีตามสถานะ/บทบาท
   @@index([ownerId, status])
   @@index([createdById])
