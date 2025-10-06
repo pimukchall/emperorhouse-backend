@@ -1,6 +1,6 @@
-// =====================================
+// ================================
 // Prisma Client & Datasource
-// =====================================
+// ================================
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,76 +10,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Gender {
-  MALE
-  FEMALE
-  OTHER
-  UNSPECIFIED
-}
+// ================================
+// Enums (ค่าคงที่ใช้ซ้ำทั้งระบบ)
+// ================================
+enum Gender { MALE FEMALE OTHER UNSPECIFIED }
+enum EmployeeType { DAILY MONTHLY }
+enum ContractType { PERMANENT TEMPORARY PROBATION }
 
-enum EmployeeType {
-  DAILY
-  MONTHLY
-}
+// NOTE: ใช้ STAFF (ไม่ใช่ STAF) กันสะกดผิด
+enum PositionLevel { STAFF SVR ASST MANAGER MD }
 
-enum ContractType {
-  PERMANENT
-  TEMPORARY
-  PROBATION
-}
+enum PositionChangeKind { PROMOTE DEMOTE TRANSFER }
 
-enum PositionLevel {
-  STAF
-  SVR
-  ASST
-  MANAGER
-  MD
-}
+// ประเภท/รอบการประเมิน
+enum EvalType { OPERATIONAL SUPERVISOR }
+enum EvalStage { MID_YEAR YEAR_END }
 
-enum PositionChangeKind {
-  PROMOTE
-  DEMOTE
-  TRANSFER
-}
+// สถานะการประเมิน (จับคู่กับ *_At ใน Evaluation ด้านล่าง)
+enum EvalStatus { DRAFT SUBMITTED APPROVER_APPROVED MD_APPROVED COMPLETED REJECTED }
 
-enum EvalType {
-  OPERATIONAL // พนักงานปฏิบัติการ
-  SUPERVISOR // พนักงานบังคับบัญชา/วิชาชีพ
-}
-
-enum EvalStage {
-  MID_YEAR
-  YEAR_END
-}
-
-enum EvalStatus {
-  DRAFT
-  SUBMITTED
-  APPROVER_APPROVED
-  MD_APPROVED
-  COMPLETED
-  REJECTED
-}
-
+// ================================
+// Role: บทบาทผู้ใช้ (admin, hr, user, ...)
+// ================================
 model Role {
   id      Int    @id @default(autoincrement())
-  name    String @unique @db.VarChar(50)
-  labelTh String @db.VarChar(120)
-  labelEn String @db.VarChar(120)
+  name    String @unique @db.VarChar(50)   // ชื่อสั้น ๆ ใช้อ้างอิงในโค้ด เช่น "admin"
+  labelTh String @db.VarChar(120)          // ป้ายภาษาไทยสำหรับ UI
+  labelEn String @db.VarChar(120)          // ป้ายภาษาอังกฤษสำหรับ UI
   users   User[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
+// ================================
+// Department: แผนก/ฝ่าย
+// ================================
 model Department {
   id     Int    @id @default(autoincrement())
-  code   String @unique @db.VarChar(32)
+  code   String @unique @db.VarChar(32)    // โค้ดแผนก เช่น HR, IT
   nameTh String @db.VarChar(120)
   nameEn String @db.VarChar(120)
 
   userDepartments UserDepartment[]
 
+  // สำหรับบันทึกย้ายตำแหน่ง (from/to)
   fromPositionChangeLogs PositionChangeLog[] @relation("pcl_fromDept")
   toPositionChangeLogs   PositionChangeLog[] @relation("pcl_toDept")
 
@@ -87,51 +62,70 @@ model Department {
   updatedAt DateTime @updatedAt
 }
 
+// ================================
+// Organization: หน่วยงาน/สาขา/บริษัท
+// ================================
 model Organization {
   id        Int       @id @default(autoincrement())
-  code      String    @unique @db.VarChar(32)
+  code      String    @db.VarChar(32)      // โค้ดองค์กร เช่น ORG01
   nameTh    String    @db.VarChar(120)
   nameEn    String    @db.VarChar(120)
-  deletedAt DateTime?
+  deletedAt DateTime?                      // soft-delete (NULL = ยังใช้งาน)
 
   users User[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Active-unique แบบ A (guard ใน service):
+  // MySQL อนุญาต NULL ซ้ำใน unique → ต้องเช็คซ้ำใน service เสมอ
+  @@unique([code, deletedAt])
 }
 
+// ================================
+// User: ผู้ใช้งาน/พนักงาน
+// ================================
 model User {
   id Int @id @default(autoincrement())
 
+  // ชื่อแสดงผลรวม (optional), แยก first/last ไทย/อังกฤษด้านล่าง
   name         String  @default("") @db.VarChar(160)
-  email        String  @unique @db.VarChar(160)
+
+  // Active-unique (เช็คใน service): email ห้ามซ้ำในแถวที่ deletedAt = NULL
+  email        String  @db.VarChar(160)
+
   passwordHash String  @db.VarChar(255)
 
+  // ชื่อ-นามสกุล 2 ภาษา (ใช้สำหรับเอกสารราชการ/รายงาน)
   firstNameTh String @db.VarChar(120)
   lastNameTh  String @db.VarChar(120)
   firstNameEn String @db.VarChar(120)
   lastNameEn  String @db.VarChar(120)
 
+  // บทบาท + หน่วยงานหลัก (nullable)
   roleId Int
   role   Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
   orgId        Int?
   organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
+  // การสังกัดแผนก (ประวัติ/หลายเรคอร์ด), และ primary link ไปยังเรคอร์ดหลัก
   userDepartments UserDepartment[]
-
   primaryUserDeptId Int?            @unique
   primaryUserDept   UserDepartment? @relation("primary_of_user", fields: [primaryUserDeptId], references: [id], onDelete: SetNull)
 
+  // Log เปลี่ยนตำแหน่ง/ผู้กระทำ
   positionChangeLogs      PositionChangeLog[] @relation("pcl_user")
   actedPositionChangeLogs PositionChangeLog[] @relation("pcl_actor")
 
+  // ความสัมพันธ์กับการประเมิน (ผู้ถูกประเมิน/ผู้จัดทำ/ผู้จัดการ/MD)
   evaluations  Evaluation[] @relation("EvalOwner")
   manageEvals  Evaluation[] @relation("EvalManager")
   mdEvals      Evaluation[] @relation("EvalMD")
   createdEvals Evaluation[] @relation("EvalCreator")
 
-  employeeCode String?       @unique @db.VarChar(32)
+  // ข้อมูล HR
+  employeeCode String?       @db.VarChar(32) // รหัสพนักงาน (อาจว่าง)
   employeeType EmployeeType?
   contractType ContractType?
 
@@ -141,22 +135,25 @@ model User {
   birthDate        DateTime?
   gender           Gender?
 
+  // ลายเซ็น/อวตาร
   signature  Bytes?
   avatarPath String? @db.VarChar(255)
 
   passwordResets PasswordReset[]
 
-  // สำหรับ lockout เบื้องต้น (ถ้ายังไม่ใช้ จะไม่มีผล)
-  failedLoginAttempts Int      @default(0)
-  lockedUntil         DateTime?
-
+  // soft-delete
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
   @@index([roleId])
   @@index([orgId])
-  @@index([email, deletedAt])
+
+  // Active-unique แบบ A (guard ใน service)
+  @@unique([employeeCode, deletedAt])
+  @@unique([email, deletedAt])
+
+  // คิวรีช่วยงานรีพอร์ต
   @@index([employeeType])
   @@index([contractType])
   @@index([startDate])
@@ -164,6 +161,9 @@ model User {
   @@index([deletedAt])
 }
 
+// ================================
+// UserDepartment: ประวัติการสังกัดแผนก/ตำแหน่ง
+// ================================
 model UserDepartment {
   id Int @id @default(autoincrement())
 
@@ -174,24 +174,33 @@ model UserDepartment {
   department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
 
   positionLevel PositionLevel
-  positionName  String? @db.VarChar(120)
+  positionName  String? @db.VarChar(120)   // ชื่อตำแหน่ง custom
 
   startedAt DateTime  @default(now())
   endedAt   DateTime?
-  isActive  Boolean   @default(true)
+  isActive  Boolean   @default(true)       // record ปัจจุบันของแผนกนั้น
 
+  // ชี้กลับจาก User.primaryUserDept
   primaryOfUser User? @relation("primary_of_user")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // กันซ้ำ: user 1 คน ไม่ให้มี record active ซ้ำใน "แผนกเดียวกัน"
+  // (แต่ยัง active ได้หลายแผนก—ถ้าอยากให้ได้แค่แผนกเดียว ต้องบังคับใน service)
   @@unique([userId, departmentId, isActive])
+
+  // ดัชนีที่ช่วยคิวรีทั่วไป
+  @@index([userId, isActive])
   @@index([userId, departmentId])
   @@index([departmentId, positionLevel])
-  @@index([startedAt])
+  @@index([userId, startedAt])
   @@index([endedAt])
 }
 
+// ================================
+// PositionChangeLog: บันทึกการเลื่อน/ย้าย/ลดตำแหน่ง
+// ================================
 model PositionChangeLog {
   id   Int                @id @default(autoincrement())
   kind PositionChangeKind
@@ -211,11 +220,11 @@ model PositionChangeLog {
   fromLevel PositionLevel?
   toLevel   PositionLevel?
 
-  fromName String? @db.VarChar(120)
-  toName   String? @db.VarChar(120)
+  fromName String? @db.VarChar(120)        // ชื่อตำแหน่งก่อนหน้า (กรณี custom)
+  toName   String? @db.VarChar(120)        // ชื่อตำแหน่งใหม่ (กรณี custom)
 
-  effectiveDate DateTime
-  reason        String?
+  effectiveDate DateTime                   // วันที่มีผล
+  reason        String? @db.Text           // เหตุผล (Text รองรับข้อความยาว)
 
   createdAt DateTime @default(now())
 
@@ -225,20 +234,27 @@ model PositionChangeLog {
   @@index([toDepartmentId])
 }
 
+// ================================
+// PasswordReset: โทเค็นรีเซ็ตรหัสผ่าน
+// ================================
 model PasswordReset {
   id        Int       @id @default(autoincrement())
   userId    Int
-  token     String    @unique @db.VarChar(255)
+  token     String    @unique @db.VarChar(255) // โทเค็นต้อง unique จริง
   expiresAt DateTime
-  usedAt    DateTime?
+  usedAt    DateTime?                         // วันที่ใช้งาน (NULL = ยังไม่ใช้)
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
-  @@index([token])
+  // ดัชนีช่วยตรวจ active token ต่อผู้ใช้
+  @@index([userId, usedAt])
+  @@index([userId, expiresAt])
 }
 
+// ================================
+// ContactMessage: แบบฟอร์มติดต่อ
+// ================================
 model ContactMessage {
   id        Int      @id @default(autoincrement())
   name      String   @db.VarChar(120)
@@ -252,15 +268,18 @@ model ContactMessage {
   @@index([email])
 }
 
+// ================================
+// EvalCycle: รอบการประเมิน
+// ================================
 model EvalCycle {
   id          Int       @id @default(autoincrement())
-  code        String    @unique @db.VarChar(64)
+  code        String    @unique @db.VarChar(64) // โค้ดรอบ เช่น 2025-MID
   year        Int
   stage       EvalStage
   openAt      DateTime
   closeAt     DateTime
-  isActive    Boolean   @default(true)
-  isMandatory Boolean   @default(true)
+  isActive    Boolean   @default(true)         // เปิดใช้งานรอบนี้อยู่
+  isMandatory Boolean   @default(true)         // บังคับทุกคนหรือไม่
 
   evaluations Evaluation[]
 
@@ -271,9 +290,13 @@ model EvalCycle {
   @@index([isActive])
 }
 
+// ================================
+// Evaluation: แบบประเมินรายบุคคล
+// ================================
 model Evaluation {
   id Int @id @default(autoincrement())
 
+  // ความสัมพันธ์หลัก
   ownerId Int
   owner   User @relation("EvalOwner", fields: [ownerId], references: [id], onDelete: Restrict)
 
@@ -291,64 +314,72 @@ model Evaluation {
   stage   EvalStage
   status  EvalStatus @default(DRAFT)
 
+  // ไทม์สแตมป์ตามสถานะ (อัปเดตใน service ให้สอดคล้อง)
   submittedAt DateTime?
   approverAt  DateTime?
   mdAt        DateTime?
   completedAt DateTime?
   rejectedAt  DateTime?
 
-  s1_responsibility  Float?
-  s1_development     Float?
-  s1_workload        Float?
-  s1_qualityStandard Float?
-  s1_coordination    Float? 
+  // คะแนนย่อย (Decimal กัน floating error)
+  s1_responsibility  Decimal? @db.Decimal(5,2)
+  s1_development     Decimal? @db.Decimal(5,2)
+  s1_workload        Decimal? @db.Decimal(5,2)
+  s1_qualityStandard Decimal? @db.Decimal(5,2)
+  s1_coordination    Decimal? @db.Decimal(5,2)
 
-  s2_valueOfWork          Float? 
-  s2_customerSatisfaction Float? 
-  s2_costEffectiveness    Float? 
-  s2_timeliness           Float?
+  s2_valueOfWork          Decimal? @db.Decimal(5,2)
+  s2_customerSatisfaction Decimal? @db.Decimal(5,2)
+  s2_costEffectiveness    Decimal? @db.Decimal(5,2)
+  s2_timeliness           Decimal? @db.Decimal(5,2)
 
-  s3_jobKnowledge         Float?
-  s3_attitude             Float?
-  s3_contextUnderstanding Float?
-  s3_systematicThinking   Float?
-  s3_decisionMaking       Float?
-  s3_adaptability         Float?
-  s3_leadership           Float?
-  s3_verbalComm           Float?
-  s3_writtenComm          Float?
-  s3_selflessness         Float?
-  s3_ruleCompliance       Float?
-  s3_selfReliance         Float?
+  s3_jobKnowledge         Decimal? @db.Decimal(5,2)
+  s3_attitude             Decimal? @db.Decimal(5,2)
+  s3_contextUnderstanding Decimal? @db.Decimal(5,2)
+  s3_systematicThinking   Decimal? @db.Decimal(5,2)
+  s3_decisionMaking       Decimal? @db.Decimal(5,2)
+  s3_adaptability         Decimal? @db.Decimal(5,2)
+  s3_leadership           Decimal? @db.Decimal(5,2)
+  s3_verbalComm           Decimal? @db.Decimal(5,2)
+  s3_writtenComm          Decimal? @db.Decimal(5,2)
+  s3_selflessness         Decimal? @db.Decimal(5,2)
+  s3_ruleCompliance       Decimal? @db.Decimal(5,2)
+  s3_selfReliance         Decimal? @db.Decimal(5,2)
 
-  t_potential           String?
-  t_strengthsWeaknesses String?
-  t_trainingNeeds       String?
+  // คำอธิบาย/สรุป (Text รองรับยาว)
+  t_potential           String? @db.Text
+  t_strengthsWeaknesses String? @db.Text
+  t_trainingNeeds       String? @db.Text
 
-  scorePerf   Float?
-  scoreResult Float?
-  scoreComp   Float?
-  scoreTotal  Float?
+  // คะแนนสรุป
+  scorePerf   Decimal? @db.Decimal(5,2)
+  scoreResult Decimal? @db.Decimal(5,2)
+  scoreComp   Decimal? @db.Decimal(5,2)
+  scoreTotal  Decimal? @db.Decimal(5,2)
 
-  submitterComment   String?
+  // ลายเซ็น/ความเห็นผู้เกี่ยวข้อง
+  submitterComment   String? @db.Text
   submitterSignedAt  DateTime?
   submitterSignature Bytes?
 
-  managerComment   String?
+  managerComment   String? @db.Text
   managerSignedAt  DateTime?
   managerSignature Bytes?
 
-  mdComment   String?
+  mdComment   String? @db.Text
   mdSignedAt  DateTime?
   mdSignature Bytes?
 
-  hrNote       String?
+  hrNote       String? @db.Text
   hrReceivedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // 1 เจ้าของ 1 รอบ มี 1 ใบประเมิน
   @@unique([cycleId, ownerId])
+
+  // ดัชนีช่วยคิวรีตามสถานะ/บทบาท
   @@index([ownerId, status])
   @@index([createdById])
   @@index([stage])
