@@ -15,7 +15,7 @@ const baseInclude = {
     },
   },
   userDepartments: {
-    where: { endedAt: null, isActive: true },
+    where: { isActive: true },
     select: {
       id: true, positionLevel: true, positionName: true,
       department: { select: { id: true, code: true, nameTh: true, nameEn: true } },
@@ -23,7 +23,7 @@ const baseInclude = {
   },
 };
 
-const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12);
+const BCRYPT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
 
 /* =============== LIST =============== */
 export async function listUsersService(
@@ -46,6 +46,7 @@ export async function listUsersService(
   if (q) {
     filters.push({
       OR: [
+        { username: ilikeContains(q) },
         { email: ilikeContains(q) },
         { name: ilikeContains(q) },
         { firstNameTh: ilikeContains(q) },
@@ -60,7 +61,7 @@ export async function listUsersService(
   if (departmentId) {
     filters.push({
       userDepartments: {
-        some: { departmentId: Number(departmentId), endedAt: null, isActive: true },
+        some: { departmentId: Number(departmentId), isActive: true },
       },
     });
   }
@@ -69,7 +70,7 @@ export async function listUsersService(
   const args = applyPrismaPagingSort(
     { where, include: baseInclude },
     { page, limit, skip, sortBy, sort },
-    { sortMap: { createdAt: "createdAt", email: "email", name: "name", default: "createdAt" } }
+    { sortMap: { createdAt: "createdAt", username: "username", email: "email", name: "name", default: "createdAt" } }
   );
 
   const [rows, total] = await Promise.all([
@@ -99,12 +100,17 @@ export async function getUserService({ prisma = defaultPrisma, id }) {
 
 /* =============== CREATE =============== */
 export async function createUserService({ prisma = defaultPrisma, data }) {
-  const email = String(data?.email || "").trim().toLowerCase();
-  if (!email) throw AppError.badRequest("ต้องระบุอีเมล");
+  const username = String(data?.username || "").trim().toLowerCase();
+  if (!username) throw AppError.badRequest("ต้องระบุ username");
+  const email = data?.email ? String(data.email).trim().toLowerCase() : null;
 
-  // กรอง soft-delete: อนุญาตสมัครซ้ำเฉพาะที่ไม่ได้ลบไว้ (ตาม policy)
-  const dup = await prisma.user.findFirst({ where: { email, deletedAt: null } });
-  if (dup) throw AppError.conflict("อีเมลนี้ถูกใช้งานแล้ว");
+  // กันซ้ำแบบ soft-unique
+  const dupUsername = await prisma.user.findFirst({ where: { username, deletedAt: null }, select: { id: true } });
+  if (dupUsername) throw AppError.conflict("username นี้ถูกใช้งานแล้ว");
+  if (email) {
+    const dupEmail = await prisma.user.findFirst({ where: { email, deletedAt: null }, select: { id: true } });
+    if (dupEmail) throw AppError.conflict("อีเมลนี้ถูกใช้งานแล้ว");
+  }
 
   const password = String(data?.password || "").trim();
   if (!password || password.length < 8) {
@@ -114,6 +120,7 @@ export async function createUserService({ prisma = defaultPrisma, data }) {
 
   return prisma.user.create({
     data: {
+      username,
       email,
       name: data?.name || "",
       passwordHash,
@@ -146,6 +153,44 @@ export async function updateUserService({ prisma = defaultPrisma, id, data }) {
   }
   if (data.birthDate !== undefined) out.birthDate = data.birthDate ? new Date(data.birthDate) : null;
   if (data.gender !== undefined) out.gender = data.gender ?? null;
+
+  // เปลี่ยน username (ถ้าส่งมา) → กันซ้ำใน active
+  if (data.username !== undefined) {
+    const newU = String(data.username || "").trim().toLowerCase();
+    if (!newU) throw AppError.badRequest("username ไม่ถูกต้อง");
+    const dup = await prisma.user.findFirst({
+      where: { username: newU, deletedAt: null, NOT: { id: uid } },
+      select: { id: true },
+    });
+    if (dup) throw AppError.conflict("username นี้ถูกใช้งานแล้ว");
+    out.username = newU;
+  }
+
+  // เปลี่ยน email (optional) → กันซ้ำเฉพาะเมื่อมีค่า
+  if (data.email !== undefined) {
+    const newEmail = data.email ? String(data.email).trim().toLowerCase() : null;
+    if (newEmail) {
+      const dup = await prisma.user.findFirst({
+        where: { email: newEmail, deletedAt: null, NOT: { id: uid } },
+        select: { id: true },
+      });
+      if (dup) throw AppError.conflict("อีเมลนี้ถูกใช้งานแล้ว");
+    }
+    out.email = newEmail;
+  }
+
+  // กันซ้ำ employeeCode แบบ soft-unique (ตาม schema @@unique([employeeCode, deletedAt]))
+  if (data.employeeCode !== undefined) {
+    const code = data.employeeCode || null;
+    if (code) {
+      const dup = await prisma.user.findFirst({
+        where: { employeeCode: code, deletedAt: null, NOT: { id: uid } },
+        select: { id: true },
+      });
+      if (dup) throw AppError.conflict("รหัสพนักงานนี้ถูกใช้งานแล้ว");
+    }
+    out.employeeCode = code;
+  }
 
   if (data.roleId !== undefined) {
     out.role = data.roleId ? { connect: { id: Number(data.roleId) } } : undefined;
@@ -196,7 +241,7 @@ export async function setPrimaryDepartmentService({ prisma = defaultPrisma, user
   if (!user) throw AppError.notFound("ไม่พบผู้ใช้งาน");
 
   let ud = await prisma.userDepartment.findFirst({
-    where: { userId: uid, departmentId: did, endedAt: null, isActive: true },
+    where: { userId: uid, departmentId: did, isActive: true },
     select: { id: true },
   });
 
@@ -205,7 +250,7 @@ export async function setPrimaryDepartmentService({ prisma = defaultPrisma, user
       data: {
         userId: uid,
         departmentId: did,
-        positionLevel: "STAF",
+        positionLevel: "STAFF",
         positionName: null,
         startedAt: new Date(),
         endedAt: null,

@@ -2,6 +2,8 @@ import nodemailer from "nodemailer";
 import { env } from "#config/env.js";
 
 let _tx = null;
+const isProd = env.NODE_ENV === "production";
+const FALLBACK_FROM = "EMP One <no-reply@example.com>";
 
 async function createTransporter() {
   if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) {
@@ -31,8 +33,8 @@ export async function getTransporter() {
 
 export async function sendMail({ to, subject, html, text }) {
   const tx = await getTransporter();
-  const info = await tx.sendMail({ from: env.MAIL_FROM, to, subject, text, html });
-  const preview = nodemailer.getTestMessageUrl(info);
+  const info = await tx.sendMail({ from: env.MAIL_FROM || FALLBACK_FROM, to, subject, text, html });
+  const preview = isProd ? null : nodemailer.getTestMessageUrl(info);
   if (preview) console.log(`📧 [Ethereal preview] ${preview}`);
   return info;
 }

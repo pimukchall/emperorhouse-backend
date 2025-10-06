@@ -69,15 +69,18 @@ export async function getOrganizationService({ prisma = defaultPrisma, id }) {
 export async function createOrganizationService({ prisma = defaultPrisma, data }) {
   let { code, nameTh, nameEn } = data || {};
   const codeStr = String(code ?? "").trim().toUpperCase();
+  if (!codeStr) throw AppError.badRequest("ต้องระบุรหัสองค์กร");
 
-  if (codeStr !== "") {
-    const exists = await prisma.organization.findFirst({ where: { code: codeStr } });
-    if (exists) throw AppError.conflict("มีรหัสที่ตั้งนี้ในระบบแล้ว");
-  }
+  // ตรวจซ้ำเฉพาะ active (soft-unique)
+  const exists = await prisma.organization.findFirst({
+    where: { code: codeStr, deletedAt: null },
+    select: { id: true },
+  });
+  if (exists) throw AppError.conflict("มีรหัสนี้ในระบบแล้ว");
 
   return prisma.organization.create({
     data: {
-      code: codeStr === "" ? undefined : codeStr,
+      code: codeStr,    // code เป็นคอลัมน์บังคับ
       nameTh: typeof nameTh === "undefined" || nameTh === "" ? null : nameTh,
       nameEn: typeof nameEn === "undefined" || nameEn === "" ? null : nameEn,
     },
@@ -95,18 +98,19 @@ export async function updateOrganizationService({ prisma = defaultPrisma, id, da
       ? undefined
       : String(data.code ?? "").trim().toUpperCase();
 
-  if (typeof codeStr !== "undefined" && codeStr !== "") {
+   if (typeof codeStr !== "undefined") {
+    if (!codeStr) throw AppError.badRequest("รหัสองค์กรห้ามว่าง");
     const exists = await prisma.organization.findFirst({
-      where: { code: codeStr, NOT: { id: oid } },
+      where: { code: codeStr, deletedAt: null, NOT: { id: oid } },
       select: { id: true },
     });
-    if (exists) throw AppError.conflict("มีรหัสที่ตั้งนี้ในระบบแล้ว");
+    if (exists) throw AppError.conflict("มีรหัสนี้ในระบบแล้ว");
   }
 
   return prisma.organization.update({
     where: { id: oid },
     data: {
-      code: typeof codeStr === "undefined" ? undefined : codeStr === "" ? null : codeStr,
+      code: typeof codeStr === "undefined" ? undefined : codeStr,
       nameTh: typeof nameTh === "undefined" ? undefined : nameTh || null,
       nameEn: typeof nameEn === "undefined" ? undefined : nameEn || null,
     },
@@ -128,6 +132,14 @@ export async function softDeleteOrganizationService({ prisma = defaultPrisma, id
 export async function restoreOrganizationService({ prisma = defaultPrisma, id }) {
   const oid = Number(id);
   if (!Number.isFinite(oid)) throw AppError.badRequest("ไอดีไม่ถูกต้อง");
+    // กันชนก่อน restore: ถ้ามี active อื่นที่ใช้ code เดียวกันอยู่แล้ว ให้บล็อก
+  const org = await prisma.organization.findUnique({ where: { id: oid }, select: { code: true } });
+  if (!org) throw AppError.notFound("ไม่พบองค์กร");
+  const dup = await prisma.organization.findFirst({
+    where: { code: org.code, deletedAt: null, NOT: { id: oid } },
+    select: { id: true },
+  });
+  if (dup) throw AppError.conflict("มีรหัสนี้ใช้งานอยู่แล้ว ไม่สามารถกู้คืนได้");
   await prisma.organization.update({ where: { id: oid }, data: { deletedAt: null } });
   return { ok: true };
 }

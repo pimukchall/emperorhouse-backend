@@ -12,6 +12,7 @@ function buildMeFromUser(u) {
   const dept = primary?.department || null;
   return {
     id: u.id,
+    username: u.username || null,
     email: u.email,
     name: u.name,
     roleName: u.role?.name || "user",
@@ -33,11 +34,12 @@ async function fetchUserSnapshot(id) {
     where: { id: Number(id), deletedAt: null },
     select: {
       id: true,
+      username: true,
       email: true,
       name: true,
       role: { select: { name: true } },
       userDepartments: {
-        where: { isActive: true, endedAt: null },
+        where: { isActive: true },
         select: {
           positionLevel: true,
           positionName: true,
@@ -114,6 +116,7 @@ export async function requireMe(req, res, next) {
   req.session.user = {
     ...(req.session.user || {}),
     id: req.me.id,
+    username: req.me.username,
     email: req.me.email,
     name: req.me.name,
     roleName: req.me.roleName,

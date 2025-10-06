@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 export const Register = z.object({
-  email: z.string().email(),
+  username: z.string().trim().min(3).max(40),   // ✅ ใช้ username เป็นหลัก
   password: z.string().min(8),
+  email: z.string().email().optional(),         // ✅ email เป็น optional
   name: z.string().trim().optional(),
+
   // ช่องทางรองรับในอนาคต (ถ้าอยากส่งชื่อจริง)
   firstNameTh: z.string().trim().optional(),
   lastNameTh: z.string().trim().optional(),
@@ -12,7 +14,7 @@ export const Register = z.object({
 });
 
 export const Login = z.object({
-  email: z.string().email(),
+  username: z.string().trim().min(3).max(40),
   password: z.string().min(8),
 });
 

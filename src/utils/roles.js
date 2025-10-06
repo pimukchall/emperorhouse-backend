@@ -1,9 +1,9 @@
 // ----- Position Levels (single source) -----
-export const PositionLevels = Object.freeze(["STAF", "SVR", "ASST", "MANAGER", "MD"]);
+export const PositionLevels = Object.freeze(["STAFF", "SVR", "ASST", "MANAGER", "MD"]);
 
-// ใช้มาตรฐาน rank = 1..5 (STAF ต่ำสุด → MD สูงสุด)
+// ใช้มาตรฐาน rank = 1..5 (STAFF ต่ำสุด → MD สูงสุด)
 export const LevelRankMap = Object.freeze({
-  STAF: 1,
+  STAFF: 1,
   SVR: 2,
   ASST: 3,
   MANAGER: 4,

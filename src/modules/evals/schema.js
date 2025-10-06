@@ -12,7 +12,7 @@ export const ListQuery = z.object({
   cycleId: z.coerce.number().int().positive().optional(),
   owner: z.enum(["me"]).optional(),
   ownerId: z.coerce.number().int().positive().optional(),
-  status: z.enum(["DRAFT","SUBMITTED","APPROVER_APPROVED","COMPLETED","REJECTED"]).optional(),
+  status: z.enum(["DRAFT","SUBMITTED","APPROVER_APPROVED","MD_APPROVED","COMPLETED","REJECTED"]).optional(),
 });
 
 export const Create = z.object({

@@ -3,7 +3,7 @@ import { AppError } from "#utils/appError.js";
 import { computeScores } from "#lib/score.js";
 
 /* ------------ rank helpers ------------ */
-const Rank = { STAF: 1, SVR: 2, ASST: 3, MANAGER: 4, MD: 5 };
+const Rank = { STAFF: 1, SVR: 2, ASST: 3, MANAGER: 4, MD: 5 };
 const rank = (lv) => Rank[String(lv || "").toUpperCase()] ?? -1;
 
 /* ------------ signature helpers ------------ */
@@ -23,7 +23,7 @@ function requireSignature(sig) {
 /* ------------ profiles ------------ */
 async function getActiveMemberships({ prisma, userId }) {
   const rows = await prisma.userDepartment.findMany({
-    where: { userId, isActive: true, endedAt: null },
+    where: { userId, isActive: true },
     select: { departmentId: true, positionLevel: true },
   });
   return rows.map((r) => ({ deptId: r.departmentId, level: r.positionLevel }));

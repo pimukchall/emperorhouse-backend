@@ -23,12 +23,13 @@ export const UserListQuery = z.object({
   roleId: z.coerce.number().int().positive().optional(),
   orgId: z.coerce.number().int().positive().optional(),
   departmentId: z.coerce.number().int().positive().optional(),
-  sortBy: z.enum(["createdAt", "email", "name"]).optional(),
+  sortBy: z.enum(["createdAt", "username", "email", "name"]).optional(),
   sort: z.enum(["asc", "desc"]).optional(),
 });
 
 export const UserCreate = z.object({
-  email: z.string().email(),
+  username: z.string().trim().min(3).max(40),
+  email: z.string().email().optional(),
   password: z.string().min(8, "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร"),
   name: z.string().trim().optional(),
   roleId: z.coerce.number().int().positive().optional(),
@@ -42,6 +43,7 @@ export const UserCreate = z.object({
 });
 
 export const UserUpdate = z.object({
+  username: z.string().trim().min(3).max(40).optional(),
   email: z.string().email().optional(),
   name: z.string().trim().optional(),
   roleId: z.coerce.number().int().positive().optional(),

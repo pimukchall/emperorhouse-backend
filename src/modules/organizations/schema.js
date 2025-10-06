@@ -25,12 +25,16 @@ export const OrgListQuery = z.object({
 });
 
 export const OrgCreate = z.object({
-  code: z.string().trim().optional(),
+  code: z.string().trim().min(1, "ต้องระบุรหัสองค์กร"),
   nameTh: z.string().trim().nullish().transform(v => v ?? null),
   nameEn: z.string().trim().nullish().transform(v => v ?? null),
 });
 
-export const OrgUpdate = OrgCreate.partial();
+ export const OrgUpdate = z.object({
+  code: z.string().trim().min(1).optional(),
+  nameTh: z.string().trim().nullish().transform(v => v ?? null).optional(),
+  nameEn: z.string().trim().nullish().transform(v => v ?? null).optional(),
+});
 
 export const OrgDeleteQuery = z.object({
   hard: Boolish.default(false),

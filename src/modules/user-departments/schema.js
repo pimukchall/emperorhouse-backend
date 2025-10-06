@@ -19,7 +19,7 @@ const IsoDateOpt = z.string().datetime().optional();
 const IsoDateNullOpt = z.string().datetime().nullable().optional();
 
 /** Enum PositionLevel ตาม Prisma */
-const PositionLevel = z.enum(["STAF", "SVR", "ASST", "MANAGER", "MD"]);
+const PositionLevel = z.enum(["STAFF", "SVR", "ASST", "MANAGER", "MD"]);
 
 /* -------------------- Query/Params -------------------- */
 export const ListQuery = z.object({

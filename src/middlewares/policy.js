@@ -35,7 +35,7 @@ async function getActiveMemberships(req, userId) {
   if (req._policy[key]) return req._policy[key];
 
   const rows = await prisma.userDepartment.findMany({
-    where: { userId: Number(userId), isActive: true, endedAt: null },
+    where: { userId: Number(userId), isActive: true },
     select: {
       positionLevel: true,
       department: { select: { id: true, code: true } },

@@ -28,13 +28,13 @@ export async function upsertRoleService({ body, prisma = defaultPrisma }) {
   return prisma.role.upsert({
     where: { name: nameKey },
     update: {
-      labelTh: body?.labelTh ?? null,
-      labelEn: body?.labelEn ?? null,
+      labelTh: (body?.labelTh ?? null) || null,
+      labelEn: (body?.labelEn ?? null) || null,
     },
     create: {
       name: nameKey,
-      labelTh: body?.labelTh ?? nameKey,
-      labelEn: body?.labelEn ?? nameKey,
+      labelTh: (body?.labelTh ?? nameKey).trim().slice(0, 120),
+      labelEn: (body?.labelEn ?? nameKey).trim().slice(0, 120),
     },
   });
 }
@@ -45,9 +45,16 @@ export async function deleteRoleService({ id, prisma = defaultPrisma }) {
     throw AppError.badRequest("id ไม่ถูกต้อง");
   }
 
-  const inUse = await prisma.user.count({ where: { roleId: rid } });
+  // คิดเฉพาะผู้ใช้ที่ยังไม่ถูกลบ (soft-delete)
+  const inUse = await prisma.user.count({ where: { roleId: rid, deletedAt: null } });
   if (inUse > 0) {
     throw AppError.conflict("มีผู้ใช้งานสิทธิ์นี้อยู่ ไม่สามารถลบได้");
+  }
+
+    // บล็อกการลบ role พื้นฐาน
+  const role = await prisma.role.findUnique({ where: { id: rid }, select: { name: true } });
+  if (role?.name === "admin") {
+    throw AppError.conflict("ไม่อนุญาตให้ลบสิทธิ์พื้นฐาน");
   }
 
   await prisma.role.delete({ where: { id: rid } });

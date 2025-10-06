@@ -16,7 +16,7 @@ export function pickSort(sortBy, allowed = ["id"]) {
 
 /** case-insensitive contains สำหรับ Prisma (MySQL 8+) */
 export function ilikeContains(q) {
-  return { contains: String(q), mode: "insensitive" };
+  return { contains: String(q ?? "").trim(), mode: "insensitive" };
 }
 
 export function isNonEmpty(v) {

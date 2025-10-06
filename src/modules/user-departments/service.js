@@ -2,7 +2,7 @@ import { prisma as defaultPrisma } from "#lib/prisma.js";
 import { AppError } from "#utils/appError.js";
 
 /** จัดลำดับชั้นตำแหน่ง (ต่ำ -> สูง) */
-export const LEVELS = ["STAF", "SVR", "ASST", "MANAGER", "MD"];
+export const LEVELS = ["STAFF", "SVR", "ASST", "MANAGER", "MD"];
 function levelRank(lv) {
   const i = LEVELS.indexOf(String(lv || ""));
   return i >= 0 ? i : -1;
@@ -33,16 +33,16 @@ export async function listAssignmentsService({
   userId,
 }) {
   const where = {
-    ...(activeOnly ? { endedAt: null, isActive: true } : {}),
+    ...(activeOnly ? { isActive: true } : {}),
     ...(departmentId ? { departmentId: Number(departmentId) } : {}),
     ...(userId ? { userId: Number(userId) } : {}),
     ...(q
       ? {
           OR: [
-            { positionName: { contains: q } },
-            { department: { nameTh: { contains: q } } },
-            { department: { nameEn: { contains: q } } },
-            { department: { code: { contains: q } } },
+            { positionName: { contains: q, mode: "insensitive" } },
+            { department: { nameTh: { contains: q, mode: "insensitive" } } },
+            { department: { nameEn: { contains: q, mode: "insensitive" } } },
+            { department: { code: { contains: q, mode: "insensitive" } } },
           ],
         }
       : {}),
@@ -67,7 +67,7 @@ export async function listByUserService({ prisma = defaultPrisma, userId, active
   if (!userId) throw AppError.badRequest("Missing userId");
   const where = {
     userId: Number(userId),
-    ...(activeOnly ? { endedAt: null, isActive: true } : {}),
+    ...(activeOnly ? { isActive: true } : {}),
   };
 
   const items = await prisma.userDepartment.findMany({
@@ -97,7 +97,7 @@ export async function assignUserToDepartmentService({ prisma = defaultPrisma, ac
   // กัน MD ซ้ำในแผนก
   if (positionLevel === "MD") {
     const mdExists = await prisma.userDepartment.findFirst({
-      where: { departmentId: Number(departmentId), positionLevel: "MD", endedAt: null, isActive: true },
+      where: { departmentId: Number(departmentId), positionLevel: "MD", isActive: true },
       select: { id: true },
     });
     if (mdExists) throw AppError.conflict("แผนกนี้มี MD อยู่แล้ว");
@@ -269,7 +269,6 @@ export async function changeLevelService({
         departmentId: ud.departmentId,
         positionLevel: "MD",
         isActive: true,
-        endedAt: null,
         NOT: { id: ud.id },
       },
       select: { id: true },

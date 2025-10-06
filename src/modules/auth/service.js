@@ -19,7 +19,8 @@ function toSessionUser(u) {
   const p = u.primaryUserDept;
   return {
     id: u.id,
-    email: u.email,
+    username: u.username,
+    email: u.email || null, 
     name: u.name || "",
     avatarPath: u.avatarPath || null,
     roleName: u.role?.name || "user",
@@ -61,6 +62,7 @@ async function getUserForSession(prisma, id) {
     where: { id, deletedAt: null },
     select: {
       id: true,
+      username: true,
       email: true,
       name: true,
       avatarPath: true,
@@ -78,7 +80,7 @@ async function getUserForSession(prisma, id) {
         },
       },
       userDepartments: {
-        where: { endedAt: null, isActive: true },
+        where: { isActive: true },
         select: {
           positionLevel: true,
           positionName: true,
@@ -102,28 +104,40 @@ function issueTokens(u) {
 
 /* ---------------- Register ---------------- */
 export async function registerService({ prisma = defaultPrisma, payload }) {
-  const email = String(payload?.email ?? "")
-    .trim()
-    .toLowerCase();
+  const rawUsername = String(payload?.username ?? "");
+  const username = rawUsername.trim().toLowerCase();
   const password = String(payload?.password ?? "").trim();
+  const email = payload?.email ? String(payload.email).trim().toLowerCase() : null;
   const name = String(payload?.name ?? "").trim();
 
-  if (!email || !password) {
-    if (!email && !password) throw AppError.badRequest("ไม่พบอีเมลและรหัสผ่าน");
-    if (!email) throw AppError.badRequest("ไม่พบอีเมล");
-    throw AppError.badRequest("ไม่พบรหัสผ่าน");
+  if (!username || !password) {
+    if (!username && !password) throw AppError.badRequest("ต้องระบุ username และรหัสผ่าน");
+    if (!username) throw AppError.badRequest("ต้องระบุ username");
+    throw AppError.badRequest("ต้องระบุรหัสผ่าน");
   }
 
-  const exists = await prisma.user.findFirst({
-    where: { email, deletedAt: null },
+  // กันซ้ำ username (เฉพาะ active)
+  const usernameDup = await prisma.user.findFirst({
+    where: { username, deletedAt: null },
+    select: { id: true },
   });
-  if (exists) throw AppError.conflict("อีเมลนี้ถูกใช้งานแล้ว");
+  if (usernameDup) throw AppError.conflict("username นี้ถูกใช้งานแล้ว");
 
-  const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
+  // ถ้ามี email ให้กันซ้ำด้วย (เฉพาะ active)
+  if (email) {
+    const emailDup = await prisma.user.findFirst({
+      where: { email, deletedAt: null },
+      select: { id: true },
+    });
+    if (emailDup) throw AppError.conflict("อีเมลนี้ถูกใช้งานแล้ว");
+  }
+
+  const rounds = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
   const passwordHash = await bcrypt.hash(password, rounds);
 
   const user = await prisma.user.create({
     data: {
+      username,
       email,
       name,
       passwordHash,
@@ -142,36 +156,28 @@ export async function registerService({ prisma = defaultPrisma, payload }) {
 
   const u = await getUserForSession(prisma, user.id);
   const sessionUser = toSessionUser(u);
-
   return { sessionUser, tokens: issueTokens(u) };
 }
 
 /* ---------------- Login ---------------- */
-export async function loginService({
-  prisma = defaultPrisma,
-  email,
-  password,
-}) {
+export async function loginService({ prisma = defaultPrisma, username, password }) {
   const user = await prisma.user.findFirst({
-    where: { email: String(email || "").toLowerCase(), deletedAt: null },
+    where: { username: String(username || "").trim().toLowerCase(), deletedAt: null },  // ✅ หาโดย username
     select: {
       id: true,
+      username: true,
       email: true,
       role: { select: { name: true } },
       passwordHash: true,
     },
   });
-  if (!user) throw AppError.unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+  if (!user) throw AppError.unauthorized("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
 
-  const ok = await bcrypt.compare(
-    String(password || ""),
-    user.passwordHash || ""
-  );
-  if (!ok) throw AppError.unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+  const ok = await bcrypt.compare(String(password || ""), user.passwordHash || "");
+  if (!ok) throw AppError.unauthorized("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
 
   const u = await getUserForSession(prisma, user.id);
   const sessionUser = toSessionUser(u);
-
   return { sessionUser, tokens: issueTokens(u) };
 }
 
@@ -207,17 +213,18 @@ export async function logoutService() {
 
 /* ---------------- Forgot / Reset / Change password ---------------- */
 export async function forgotPasswordService({ prisma = defaultPrisma, email }) {
+  const normalized = String(email || "").toLowerCase().trim();
+  if (!normalized) return { ok: true }; // ไม่โชว์ว่า user มี/ไม่มี
+
   const user = await prisma.user.findFirst({
-    where: { email: String(email || "").toLowerCase(), deletedAt: null },
+    where: { email: normalized, deletedAt: null },
     select: { id: true, firstNameTh: true, firstNameEn: true, email: true },
   });
 
-  if (user) {
+  if (user && user.email) {  // ส่งเมลได้เฉพาะเมื่อมี email
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 นาที
-    await prisma.passwordReset.create({
-      data: { userId: user.id, token, expiresAt },
-    });
+    await prisma.passwordReset.create({ data: { userId: user.id, token, expiresAt } });
 
     const resetUrl = makeResetLink(token);
     const { subject, html, text } = renderForgotPasswordEmail({
@@ -233,40 +240,23 @@ export async function forgotPasswordService({ prisma = defaultPrisma, email }) {
   return { ok: true };
 }
 
-export async function resetPasswordService({
-  prisma = defaultPrisma,
-  token,
-  newPassword,
-}) {
-  if (!token || !newPassword)
-    throw AppError.badRequest("ต้องระบุ token และรหัสผ่านใหม่");
+export async function resetPasswordService({ prisma = defaultPrisma, token, newPassword }) {
+  if (!token || !newPassword) throw AppError.badRequest("ต้องระบุ token และรหัสผ่านใหม่");
 
   const rec = await prisma.passwordReset.findUnique({
     where: { token },
-    include: {
-      user: {
-        select: { id: true, email: true, firstNameTh: true, firstNameEn: true },
-      },
-    },
+    include: { user: { select: { id: true, email: true, firstNameTh: true, firstNameEn: true } } },
   });
   if (!rec) throw AppError.badRequest("โทเคนไม่ถูกต้อง");
   if (rec.usedAt) throw AppError.badRequest("โทเคนถูกใช้งานแล้ว");
-  if (rec.expiresAt && rec.expiresAt.getTime() < Date.now()) {
-    throw AppError.badRequest("โทเคนหมดอายุ");
-  }
+  if (rec.expiresAt && rec.expiresAt.getTime() < Date.now()) throw AppError.badRequest("โทเคนหมดอายุ");
 
-  const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
+  const rounds = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
   const hash = await bcrypt.hash(String(newPassword), rounds);
 
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: rec.userId },
-      data: { passwordHash: hash },
-    });
-    await tx.passwordReset.update({
-      where: { token },
-      data: { usedAt: new Date() },
-    });
+    await tx.user.update({ where: { id: rec.userId }, data: { passwordHash: hash } });
+    await tx.passwordReset.update({ where: { token }, data: { usedAt: new Date() } });
     await tx.passwordReset.updateMany({
       where: { userId: rec.userId, usedAt: null, NOT: { token } },
       data: { expiresAt: new Date(0) },
@@ -274,9 +264,11 @@ export async function resetPasswordService({
   });
 
   try {
-    const name = rec.user.firstNameTh || rec.user.firstNameEn || "";
-    const { subject, html, text } = renderPasswordChangedEmail({ name });
-    await sendMail({ to: rec.user.email, subject, html, text });
+    if (rec.user.email) {
+      const name = rec.user.firstNameTh || rec.user.firstNameEn || "";
+      const { subject, html, text } = renderPasswordChangedEmail({ name });
+      await sendMail({ to: rec.user.email, subject, html, text });
+    }
   } catch (err) {
     console.error("sendMail(reset) failed:", err);
   }
@@ -284,46 +276,31 @@ export async function resetPasswordService({
   return { ok: true };
 }
 
-export async function changePasswordService({
-  prisma = defaultPrisma,
-  userId,
-  currentPassword,
-  newPassword,
-}) {
+export async function changePasswordService({ prisma = defaultPrisma, userId, currentPassword, newPassword }) {
   if (!userId) throw AppError.badRequest("ไม่พบผู้ใช้");
   if (!newPassword) throw AppError.badRequest("ต้องระบุรหัสผ่านใหม่");
 
   const user = await prisma.user.findUnique({
     where: { id: Number(userId) },
-    select: {
-      id: true,
-      email: true,
-      passwordHash: true,
-      firstNameTh: true,
-      firstNameEn: true,
-    },
+    select: { id: true, email: true, username: true, passwordHash: true, firstNameTh: true, firstNameEn: true },
   });
   if (!user) throw AppError.notFound("ไม่พบผู้ใช้");
 
-  const ok = await bcrypt.compare(
-    String(currentPassword || ""),
-    user.passwordHash || ""
-  );
+  const ok = await bcrypt.compare(String(currentPassword || ""), user.passwordHash || "");
   if (!ok) throw AppError.badRequest("รหัสผ่านปัจจุบันไม่ถูกต้อง");
 
-  const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
+  const rounds = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
   const hash = await bcrypt.hash(String(newPassword), rounds);
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { passwordHash: hash },
-  });
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash } });
 
   try {
-    const { subject, html, text } = renderPasswordChangedEmail({
-      name: user.firstNameTh || user.firstNameEn || "",
-    });
-    await sendMail({ to: user.email, subject, html, text });
+    if (user.email) {
+      const { subject, html, text } = renderPasswordChangedEmail({
+        name: user.firstNameTh || user.firstNameEn || "",
+      });
+      await sendMail({ to: user.email, subject, html, text });
+    }
   } catch (err) {
     console.error("sendMail(change) failed:", err);
   }
@@ -337,6 +314,7 @@ export async function meService({ prisma = defaultPrisma, userId }) {
     where: { id: Number(userId), deletedAt: null },
     select: {
       id: true,
+      username: true,
       email: true,
       name: true,
       avatarPath: true,
@@ -355,7 +333,7 @@ export async function meService({ prisma = defaultPrisma, userId }) {
         },
       },
       userDepartments: {
-        where: { endedAt: null, isActive: true },
+        where: { isActive: true },
         select: {
           positionLevel: true,
           positionName: true,

@@ -28,8 +28,8 @@ export const registerController = [
 // POST /api/auth/login
 export const loginController = [
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
-    const result = await loginService({ email, password });
+    const { username, password } = req.body;
+    const result = await loginService({ username, password });
     if (result.tokens?.refreshToken)
       setRefreshCookie(res, result.tokens.refreshToken);
     res.json({

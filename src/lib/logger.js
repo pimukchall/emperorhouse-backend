@@ -6,7 +6,7 @@ const level  = process.env.LOG_LEVEL || (isProd ? "info" : "debug");
 
 export const logger = pino(
   isProd
-    ? { level, redact: ["req.headers.authorization", "res.headers.set-cookie"] }
+    ? { level, redact: ["req.headers.authorization", "res.headers.set-cookie", "req.body.password", "req.body.token", "req.query.token"] }
     : {
         level,
         transport: { target: "pino-pretty", options: { colorize: true } },

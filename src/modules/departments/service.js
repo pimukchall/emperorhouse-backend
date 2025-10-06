@@ -8,18 +8,15 @@ export async function listDepartmentsService(
   { page = 1, limit = 20, skip = 0, sortBy = "code", sort = "asc", q = "" } = {},
   { prisma = defaultPrisma } = {}
 ) {
-  const where = {
-    deletedAt: null,
-    ...(q
-      ? {
-          OR: [
-            { code: { contains: q, mode: "insensitive" } },
-            { nameTh: { contains: q, mode: "insensitive" } },
-            { nameEn: { contains: q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-  };
+  const where = q
+    ? {
+        OR: [
+          { code:  { contains: q, mode: "insensitive" } },
+          { nameTh:{ contains: q, mode: "insensitive" } },
+          { nameEn:{ contains: q, mode: "insensitive" } },
+        ],
+      }
+    : {};
 
   const args = applyPrismaPagingSort(
     { where, select: SELECT },
@@ -84,7 +81,7 @@ export async function deleteDepartmentService({ prisma = defaultPrisma, id }) {
   if (!Number.isFinite(did)) throw AppError.badRequest("id ไม่ถูกต้อง");
 
   const inUse = await prisma.userDepartment.count({
-    where: { departmentId: did, endedAt: null, isActive: true },
+    where: { departmentId: did, isActive: true },
   });
   if (inUse > 0) throw AppError.conflict("ไม่สามารถลบแผนกที่มีพนักงานอยู่ได้");
 
